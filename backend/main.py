@@ -17,7 +17,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from db.qdrant_client import create_collection, get_all_patients, get_patient_by_id, store_patient
-from llm.extractor import extract_patient_data, extraction_backend
+from llm.extractor import GEMINI_MODEL, extract_patient_data, extraction_backend
 from services.portal_mapper import build_portal_prefill
 from services.risk_engine import calculate_risk
 
@@ -140,6 +140,18 @@ def _run_voice_pipeline(
 @app.get("/", response_class=PlainTextResponse)
 def root() -> str:
     return "SAATHI backend running"
+
+
+@app.get("/health/llm")
+def health_llm() -> dict[str, Any]:
+    """Which LLM backend this instance will use (no secrets). For Render env debugging."""
+    gemini_set = bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
+    return {
+        "llm_backend": extraction_backend(),
+        "gemini_key_present": gemini_set,
+        "gemini_model": GEMINI_MODEL,
+        "saathi_llm_env": os.environ.get("SAATHI_LLM"),
+    }
 
 
 @app.get("/patients")
