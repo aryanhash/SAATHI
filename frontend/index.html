@@ -567,9 +567,11 @@
           });
         }
 
-        function wireVapiOnce() {
+        function wireVapiOnce(VapiCtor) {
           if (vapiInstance) return vapiInstance;
-          vapiInstance = new Vapi(VAPI_PUBLIC_KEY);
+          var Ctor = VapiCtor || (typeof Vapi !== "undefined" ? Vapi : window.Vapi);
+          if (!Ctor) throw new Error("Vapi constructor not available");
+          vapiInstance = new Ctor(VAPI_PUBLIC_KEY);
           vapiInstance.on("call-end", function () {
             $("end-call").classList.add("view-hidden");
             $("start-call").classList.remove("view-hidden");
@@ -678,10 +680,12 @@
           }
           try {
             await loadVapiScript();
-            if (typeof Vapi === "undefined") throw new Error("Vapi global missing after script load");
-            const vapi = wireVapiOnce();
+            var VapiCtor = typeof Vapi !== "undefined" ? Vapi : typeof window !== "undefined" && window.Vapi;
+            if (!VapiCtor) throw new Error("Vapi global missing after script load (expected window.Vapi)");
+            const vapi = wireVapiOnce(VapiCtor);
             showToast("Starting voice… allow microphone if asked");
-            vapi.start({ assistantId: VAPI_ASSISTANT_ID });
+            // Web SDK expects assistant id as a string, not { assistantId } (object = inline assistant shape).
+            vapi.start(VAPI_ASSISTANT_ID);
           } catch (e) {
             showToast("Vapi: " + (e.message || e));
           }
