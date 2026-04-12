@@ -269,16 +269,22 @@ async def vapi_webhook(request: Request) -> dict[str, Any]:
     logger.info("WEBHOOK payload_keys=%s", list(payload.keys()))
     logger.debug("WEBHOOK payload_full=%s", json.dumps(payload, default=str)[:8000])
 
-    event = payload.get("event")
-    logger.info("WEBHOOK event=%r", event)
-    if event != "call-ended":
-        logger.info("WEBHOOK action=ignored reason=event_not_call-ended")
-        return {"status": "ignored", "event": event}
-
+    # Vapi often sends { "transcript": "..." } with no `event` key on the final payload.
+    # We also accept explicit event == "call-ended" (and a few aliases seen in the wild).
     transcript = payload.get("transcript")
     if not isinstance(transcript, str) or not transcript.strip():
-        logger.warning("WEBHOOK action=rejected reason=missing_or_empty_transcript type=%s", type(transcript).__name__)
-        raise HTTPException(status_code=400, detail="call-ended payload must include non-empty transcript")
+        logger.warning(
+            "WEBHOOK action=rejected reason=missing_or_empty_transcript type=%s",
+            type(transcript).__name__,
+        )
+        raise HTTPException(status_code=400, detail="Payload must include non-empty string transcript")
+
+    event = payload.get("event")
+    logger.info("WEBHOOK event=%r", event)
+    final_events = {None, "call-ended", "end-of-call-report"}
+    if event not in final_events:
+        logger.info("WEBHOOK action=ignored reason=event_not_final event=%r", event)
+        return {"status": "ignored", "event": event}
 
     call_block = payload.get("call")
     call_id = call_block.get("id") if isinstance(call_block, dict) else None

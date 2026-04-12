@@ -133,6 +133,6 @@ Then visit `http://localhost:3000` (UI only until Task 9 connects the API).
 | `QDRANT_URL` | Qdrant REST URL (Qdrant Cloud HTTPS, or local `http://127.0.0.1:6333`, or `:memory:`). |
 | `QDRANT_API_KEY` | [Qdrant Cloud Database API key](https://qdrant.tech/documentation/cloud/authentication/); omit for local Docker. |
 | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | If set, extraction uses **Gemini** instead of Ollama. |
-| `GEMINI_MODEL` | Gemini model id (default `gemini-2.0-flash`). |
+| `GEMINI_MODEL` | Gemini model id (default `gemini-2.5-flash`). |
 | `SAATHI_LLM` | `gemini` or `ollama` to force one backend when debugging. |
 | `OLLAMA_BASE_URL` | Ollama base (default `http://127.0.0.1:11434`). Used when no Gemini key (or `SAATHI_LLM=ollama`). |
