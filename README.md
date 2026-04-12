@@ -54,12 +54,10 @@ Dashboard UI (same server): `http://localhost:8000/ui/`
 ### Deploy on Render (stable URL for Vapi — no ngrok)
 
 1. Push this repo to GitHub.
-2. Render → **New** → **Blueprint** (uses `render.yaml`) or **Web Service** with:
-   - **Root directory:** `backend`
-   - **Build command:** `pip install -r requirements.txt`
-   - **Start command:** `uvicorn main:app --host 0.0.0.0 --port $PORT`  
-     (`PORT` is injected by Render — do not hard-code `10000`.)
-3. In the Render service → **Environment**, set at least:
+2. **Choose a runtime on Render**
+   - **Docker (recommended if you picked “Docker” before):** leave the **root** as the repo root; Render will find **`Dockerfile`**. No `rootDir: backend` in the service settings.
+   - **Native Python:** set **Root directory** to `backend`, **Build:** `pip install -r requirements.txt`, **Start:** `uvicorn main:app --host 0.0.0.0 --port $PORT` (`PORT` is set by Render).
+3. **Environment** on the service — set at least:
    - **`QDRANT_URL`** — cluster HTTPS URL from [Qdrant Cloud](https://cloud.qdrant.io/) (same host you use in `curl`; often ends with `:6333` for REST).
    - **`QDRANT_API_KEY`** — **Database API key** from the cluster (create under **API Keys** on the cluster detail page). Qdrant expects this on every request as header `api-key` or `Authorization: Bearer …`; the Python client sends it when you pass `api_key=` (see [Authentication](https://qdrant.tech/documentation/cloud/authentication/)).
    - **`GEMINI_API_KEY`** (or **`GOOGLE_API_KEY`**) — so extraction uses **Gemini** on the public internet (recommended on Render).

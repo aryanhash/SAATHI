@@ -1,0 +1,10 @@
+.git
+.github
+**/.venv
+**/__pycache__
+**/*.pyc
+.env
+.env.*
+data/qdrant_storage
+.DS_Store
+.cursor
