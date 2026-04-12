@@ -1,4 +1,4 @@
-# SAATHI — Smart ANM Assistant for Total Health Intelligence
+# SAATHI — Smart  Assistant for Total Health Intelligence
 
 Voice-first healthcare assistant for India's frontline health workers (ANM/ASHA). Workers speak patient visit details in their preferred language; SAATHI extracts structured data via AI, detects emergencies, stores history in a vector DB, maps to real government portal forms (ANMOL/RCH, U-WIN, NCD), and surfaces a mobile dashboard with emergency routing.
 
