@@ -17,7 +17,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from db.qdrant_client import create_collection, get_all_patients, get_patient_by_id, store_patient
+from db.qdrant_client import (
+    create_collection,
+    embedding_mode,
+    get_all_patients,
+    get_emergencies as db_get_emergencies,
+    get_patient_by_id,
+    get_patients_by_risk,
+    get_patients_by_visit_type,
+    search_similar,
+    store_patient,
+)
 from llm.extractor import GEMINI_MODEL, extract_patient_data, extraction_backend
 from services.portal_mapper import build_portal_prefill
 from services.risk_engine import calculate_risk, detect_emergency
@@ -228,6 +238,7 @@ def health_llm() -> dict[str, Any]:
         "llm_backend": extraction_backend(),
         "gemini_key_present": gemini_set,
         "gemini_model": GEMINI_MODEL,
+        "embedding_mode": embedding_mode(),
         "saathi_llm_env": os.environ.get("SAATHI_LLM"),
         "vapi_public_key_present": bool((os.environ.get("VAPI_PUBLIC_KEY") or "").strip()),
         "vapi_assistant_id_present": bool((os.environ.get("VAPI_ASSISTANT_ID") or "").strip()),
@@ -270,9 +281,10 @@ def list_patients() -> list[dict[str, Any]]:
 
 @app.get("/risk-flags")
 def risk_flags() -> list[dict[str, Any]]:
+    """Red-risk patients — filtered at Qdrant DB level (not in Python)."""
     try:
-        reds = [p for p in get_all_patients() if p.get("risk_level") == "red"]
-        logger.info("route.risk_flags ok red_count=%s", len(reds))
+        reds = get_patients_by_risk("red")
+        logger.info("route.risk_flags ok red_count=%s (db-filtered)", len(reds))
         return reds
     except Exception as e:
         logger.warning("route.risk_flags failed err=%s", e)
@@ -281,27 +293,25 @@ def risk_flags() -> list[dict[str, Any]]:
 
 @app.get("/emergencies")
 def emergencies() -> list[dict[str, Any]]:
-    """Active emergency cases — severity critical or urgent."""
+    """Active emergencies — filtered at Qdrant DB level by emergency.is_emergency."""
     try:
-        all_p = get_all_patients()
-        emg: list[dict[str, Any]] = []
-        for p in all_p:
+        emg_patients = db_get_emergencies()
+        result: list[dict[str, Any]] = []
+        for p in emg_patients:
             em = p.get("emergency", {})
-            if isinstance(em, dict) and em.get("is_emergency"):
-                emg.append({
-                    "patient_id": p.get("patient_id"),
-                    "patient_name": p.get("patient_name"),
-                    "age_years": p.get("age_years"),
-                    "blood_pressure": p.get("blood_pressure"),
-                    "severity": em.get("severity"),
-                    "reasons": em.get("reasons", []),
-                    "recommended_action": em.get("recommended_action"),
-                    "detected_at": em.get("detected_at"),
-                    "location": p.get("location"),
-                    "phone": p.get("phone"),
-                })
-        emg.sort(key=lambda x: 0 if x.get("severity") == "critical" else 1)
-        return emg
+            result.append({
+                "patient_id": p.get("patient_id"),
+                "patient_name": p.get("patient_name"),
+                "age_years": p.get("age_years"),
+                "blood_pressure": p.get("blood_pressure"),
+                "severity": em.get("severity"),
+                "reasons": em.get("reasons", []),
+                "recommended_action": em.get("recommended_action"),
+                "detected_at": em.get("detected_at"),
+                "location": p.get("location"),
+                "phone": p.get("phone"),
+            })
+        return result
     except Exception as e:
         logger.warning("route.emergencies failed err=%s", e)
         return []
@@ -339,6 +349,35 @@ def analytics() -> dict[str, Any]:
         "emergency_count": emergency_count,
         "referral_count": has_referral,
     }
+
+
+@app.get("/search")
+def search_patients(q: str = "", limit: int = 10) -> dict[str, Any]:
+    """
+    Semantic search: find patients whose records are most similar to the query.
+    With Gemini embeddings → true semantic similarity (e.g. "headache pregnant" finds ANC patients with headache).
+    """
+    if not q.strip():
+        return {"query": q, "results": [], "embedding_mode": embedding_mode()}
+    try:
+        results = search_similar(q.strip(), limit=min(limit, 50))
+        logger.info("route.search query=%r results=%s mode=%s", q, len(results), embedding_mode())
+        return {"query": q, "results": results, "embedding_mode": embedding_mode()}
+    except Exception as e:
+        logger.warning("route.search failed err=%s", e)
+        return {"query": q, "results": [], "error": str(e)}
+
+
+@app.get("/patients/by-type/{visit_type}")
+def patients_by_type(visit_type: str) -> list[dict[str, Any]]:
+    """Filter patients by visit type at DB level (ANC, PNC, NCD, immunization)."""
+    try:
+        rows = get_patients_by_visit_type(visit_type)
+        logger.info("route.by_type type=%s count=%s", visit_type, len(rows))
+        return rows
+    except Exception as e:
+        logger.warning("route.by_type failed err=%s", e)
+        return []
 
 
 @app.get("/portal-prefill/{patient_id}")
