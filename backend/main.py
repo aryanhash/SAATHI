@@ -272,12 +272,16 @@ async def vapi_webhook(request: Request) -> dict[str, Any]:
     # Vapi often sends { "transcript": "..." } with no `event` key on the final payload.
     # We also accept explicit event == "call-ended" (and a few aliases seen in the wild).
     transcript = payload.get("transcript")
-    if not isinstance(transcript, str) or not transcript.strip():
+    if transcript is None or not isinstance(transcript, str):
         logger.warning(
-            "WEBHOOK action=rejected reason=missing_or_empty_transcript type=%s",
+            "WEBHOOK action=rejected reason=missing_transcript type=%s",
             type(transcript).__name__,
         )
-        raise HTTPException(status_code=400, detail="Payload must include non-empty string transcript")
+        raise HTTPException(status_code=400, detail="Payload must include string field transcript")
+    if not transcript.strip():
+        # Vapi may POST multiple times; empty transcript should not be a client error (avoid 400 + retries).
+        logger.info("WEBHOOK action=ignored reason=empty_transcript raw_len=%s", len(transcript))
+        return {"status": "ignored", "reason": "empty_transcript"}
 
     event = payload.get("event")
     logger.info("WEBHOOK event=%r", event)
