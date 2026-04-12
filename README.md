@@ -49,7 +49,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 API base URL: `http://localhost:8000`  
-Dashboard UI (same server): `http://localhost:8000/ui/`
+Dashboard UI (same server): **`http://localhost:8000/ui/`** (trailing slash; opening only `http://localhost:8000/` shows the plain text API banner, not the app).
 
 ### Deploy on Render (stable URL for Vapi — no ngrok)
 
@@ -153,3 +153,5 @@ Static-only `http.server` does **not** inject env vars; use **`http://localhost:
 | `GEMINI_MODEL` | Gemini model id (default `gemini-2.5-flash`). |
 | `SAATHI_LLM` | `gemini` or `ollama` to force one backend when debugging. |
 | `OLLAMA_BASE_URL` | Ollama base (default `http://127.0.0.1:11434`). Used when no Gemini key (or `SAATHI_LLM=ollama`). |
+| `VAPI_PUBLIC_KEY` | Vapi **public** key for the Web SDK (`/ui/` + `/api/vapi-client-config`). |
+| `VAPI_ASSISTANT_ID` | Assistant id for `vapi.start(...)`. |

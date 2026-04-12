@@ -57,6 +57,12 @@ async def lifespan(app: FastAPI):
         vapi_aid,
         extraction_backend(),
     )
+    _fp = _REPO_ROOT / "frontend" / "index.html"
+    if not _fp.is_file():
+        logger.warning(
+            "saathi.frontend_missing path=%s — GET /ui/ will not work; clone full repo (not backend-only) or use Docker COPY frontend/",
+            _fp,
+        )
     try:
         create_collection()
         logger.info("saathi.boot qdrant_ok collection_ready")
