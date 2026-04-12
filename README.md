@@ -1,37 +1,69 @@
 # SAATHI — Smart ANM Assistant for Total Health Intelligence
 
-Voice-first healthcare MVP: ANM workers speak patient details; the system extracts structured data, stores history, maps to ANMOL / U-WIN / NCD-style forms, and surfaces a mobile dashboard.
+Voice-first healthcare assistant for India's frontline health workers (ANM/ASHA). Workers speak patient visit details in their preferred language; SAATHI extracts structured data via AI, detects emergencies, stores history in a vector DB, maps to real government portal forms (ANMOL/RCH, U-WIN, NCD), and surfaces a mobile dashboard with emergency routing.
 
-### Production-style pipeline (hackathon / Render)
+## Key Features
+
+- **Multi-language voice** — asks preferred language at call start; supports Hindi, English, Tamil, Telugu, Bengali, Kannada, Marathi, Gujarati, Malayalam, Odia, Punjabi, Assamese
+- **40+ field AI extraction** — Gemini extracts patient name, vitals (BP, Hb, SpO2, pulse, temperature), symptoms, medicines, vaccines, referral details, emergency signs, and more from natural conversation
+- **Emergency detection & routing** — auto-detects critical conditions (hypertensive crisis, severe anemia, hypoxia, convulsions, pregnancy danger signs) with severity levels (critical/urgent) and one-tap 108 ambulance calling
+- **Real government portal mapping** — ANMOL/RCH (ANC registration, visit records), U-WIN (immunization schedule per India NIP), NCD/NPCDCS (CBAC screening, hypertension/diabetes classification)
+- **Rural + Urban** — works for village sub-centres and tier-1 city UPHCs alike
+- **Risk triage** — automated red/amber/green risk classification with risk factors
+- **Analytics dashboard** — patient counts, risk distribution, visit type breakdown, emergency/referral tracking
+
+## Architecture
 
 ```text
-Vapi  →  Render (FastAPI)  →  Gemini API  →  Qdrant Cloud
+Vapi (voice)  →  Render (FastAPI)  →  Gemini API (extraction)  →  Qdrant Cloud (storage)
+     ↑                  ↓
+Browser SDK      Emergency detection → Risk triage → Portal mapping
+(12 languages)        ↓                                    ↓
+                  Dashboard UI                    ANMOL / U-WIN / NCD
 ```
 
-1. **Vapi** `POST`s to `https://<your-app>.onrender.com/vapi-webhook` with a **`transcript`** string. The handler runs when `event` is missing, **`call-ended`**, or **`end-of-call-report`** (Vapi often sends transcript-only JSON with no `event`).
-2. **Render** runs this repo’s FastAPI service (`$PORT`, `0.0.0.0`).
-3. **Gemini** runs structured JSON extraction when `GEMINI_API_KEY` or `GOOGLE_API_KEY` is set (see below). Without a key, the app uses **Ollama** at `OLLAMA_BASE_URL` (typical for local dev only).
-4. **Qdrant Cloud** (or any reachable Qdrant) is configured with **`QDRANT_URL`** so visits persist after deploy.
-
-## Project layout
+## Project Layout
 
 ```
 .
-├── backend/           # FastAPI application
-│   ├── main.py
-│   └── requirements.txt
-├── frontend/          # Mobile-first PWA UI (vanilla JS + Tailwind)
-├── data/              # Local data (e.g. Qdrant volume mount)
-└── docker-compose.yml # Local Qdrant
+├── backend/
+│   ├── main.py                    # FastAPI app, routes, Vapi webhook, system prompt
+│   ├── requirements.txt
+│   ├── llm/
+│   │   └── extractor.py           # Gemini/Ollama structured extraction (40+ fields)
+│   ├── services/
+│   │   ├── risk_engine.py         # Risk triage + emergency detection
+│   │   └── portal_mapper.py       # ANMOL/RCH, U-WIN, NCD portal mapping
+│   └── db/
+│       └── qdrant_client.py       # Qdrant persistence (cloud or in-memory fallback)
+├── frontend/
+│   └── index.html                 # Mobile-first SPA (vanilla JS + Tailwind)
+├── Dockerfile                     # Docker image for Render
+├── render.yaml                    # Render Blueprint
+└── .env.example                   # Environment variable template
 ```
 
-## Prerequisites
+## API Endpoints
 
-- Python 3.11+ recommended
-- **Local:** [Docker](https://docs.docker.com/get-docker/) (optional, for local Qdrant) and [Ollama](https://ollama.com/) if you are **not** using Gemini
-- **Render:** [Google AI Studio](https://aistudio.google.com/apikey) API key for **Gemini**, and a **Qdrant Cloud** cluster URL for **`QDRANT_URL`**
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/` | Health check |
+| `GET` | `/health/llm` | LLM backend status, key presence |
+| `GET` | `/patients` | All patients from Qdrant |
+| `GET` | `/risk-flags` | Red-risk patients only |
+| `GET` | `/emergencies` | Active emergency cases (critical + urgent) |
+| `GET` | `/analytics` | Dashboard analytics (counts, distributions) |
+| `GET` | `/portal-prefill/:id` | ANMOL/RCH, U-WIN, NCD pre-filled forms for a patient |
+| `GET` | `/api/vapi-client-config` | Vapi SDK keys for browser |
+| `GET` | `/api/system-prompt` | Multi-language system prompt for Vapi assistant |
+| `POST` | `/simulate-call` | Process a transcript (same pipeline as webhook) |
+| `POST` | `/vapi-webhook` | Vapi webhook endpoint (call-ended transcripts) |
+| `POST` | `/process-visit` | Extract + risk-triage without storing |
+| `POST` | `/store-patient` | Direct patient storage |
+| `POST` | `/seed-demo` | Insert 10 realistic demo patients |
+| `GET` | `/ui/` | Frontend SPA with injected Vapi keys |
 
-## Backend setup
+## Quick Start (Local)
 
 ```bash
 cd backend
@@ -40,118 +72,135 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### Run FastAPI (local)
+Copy `.env.example` to `.env` in the repo root and fill in your keys:
+
+```bash
+cp .env.example .env
+# Edit .env with your VAPI_PUBLIC_KEY, VAPI_ASSISTANT_ID, GEMINI_API_KEY, etc.
+```
+
+Run the server:
 
 ```bash
 cd backend
-source .venv/bin/activate
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-API base URL: `http://localhost:8000`  
-Dashboard UI (same server): **`http://localhost:8000/ui/`** (trailing slash; opening only `http://localhost:8000/` shows the plain text API banner, not the app).
+Open **`http://localhost:8000/ui/`** (trailing slash required).
 
-### Deploy on Render (stable URL for Vapi — no ngrok)
+## Deploy on Render
 
 1. Push this repo to GitHub.
-2. **Choose a runtime on Render**
-   - **Docker (recommended if you picked “Docker” before):** leave the **root** as the repo root; Render will find **`Dockerfile`**. No `rootDir: backend` in the service settings.
-   - **Native Python:** set **Root directory** to `backend`, **Build:** `pip install -r requirements.txt`, **Start:** `uvicorn main:app --host 0.0.0.0 --port $PORT` (`PORT` is set by Render).
-3. **Environment** on the service — set at least:
-   - **`QDRANT_URL`** — cluster HTTPS URL from [Qdrant Cloud](https://cloud.qdrant.io/) (same host you use in `curl`; often ends with `:6333` for REST).
-   - **`QDRANT_API_KEY`** — **Database API key** from the cluster (create under **API Keys** on the cluster detail page). Qdrant expects this on every request as header `api-key` or `Authorization: Bearer …`; the Python client sends it when you pass `api_key=` (see [Authentication](https://qdrant.tech/documentation/cloud/authentication/)).
-   - **`GEMINI_API_KEY`** (or **`GOOGLE_API_KEY`**) — so extraction uses **Gemini** on the public internet (recommended on Render).
-   - Optional **`GEMINI_MODEL`** — default in code is `gemini-2.5-flash` (Google retired `gemini-2.0-flash` for new API users).
-   - **`SAATHI_LLM=ollama`** — only if you intentionally want Ollama instead of Gemini when both could be configured.
-   - **`OLLAMA_BASE_URL`** — only for remote Ollama; not required when Gemini is configured.
-4. After deploy, set Vapi’s webhook to:
+2. Create a **Web Service** on Render:
+   - **Docker** runtime (recommended) — Render finds the `Dockerfile` at repo root.
+   - Or **Native Python**: root dir `backend`, build `pip install -r requirements.txt`, start `uvicorn main:app --host 0.0.0.0 --port $PORT`.
+3. Set environment variables on Render:
 
-   `https://<your-service>.onrender.com/vapi-webhook`
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GEMINI_API_KEY` | Yes | [Google AI Studio](https://aistudio.google.com/apikey) API key |
+| `QDRANT_URL` | Yes | Qdrant Cloud HTTPS endpoint |
+| `QDRANT_API_KEY` | Yes | Qdrant Cloud database API key |
+| `VAPI_PUBLIC_KEY` | Yes | Vapi public key (browser SDK) |
+| `VAPI_ASSISTANT_ID` | Yes | Your Vapi assistant ID |
+| `GEMINI_MODEL` | No | Default `gemini-2.5-flash` |
+| `SAATHI_LLM` | No | Force `gemini` or `ollama` |
+| `OLLAMA_BASE_URL` | No | Only for remote Ollama |
 
-5. **Logs:** Render dashboard → your service → **Logs**. Search for `WEBHOOK_HIT`, `pipeline.`, and `http.in` / `http.out`.
+4. Set your Vapi assistant's **webhook URL** to:
+   ```
+   https://<your-service>.onrender.com/vapi-webhook
+   ```
 
-## Qdrant Cloud (Render / Vapi backend)
+5. Set your Vapi assistant's **System Prompt** — fetch the latest from:
+   ```
+   https://<your-service>.onrender.com/api/system-prompt
+   ```
 
-Official docs: **[Database Authentication](https://qdrant.tech/documentation/cloud/authentication/)** · Python client: **`QdrantClient(host, api_key=...)`** or **`QdrantClient(url=..., api_key=...)`** ([interfaces](https://qdrant.tech/documentation/interfaces/)).
+## Vapi Assistant Setup
 
-1. In [Qdrant Cloud](https://cloud.qdrant.io/), open your cluster → copy the **REST endpoint** (HTTPS, often port **6333**).
-2. **Cluster → API Keys → Create** — copy the key once; SAATHI reads it from **`QDRANT_API_KEY`** (do not commit it to git).
-3. On Render, set **`QDRANT_URL`** and **`QDRANT_API_KEY`**. Boot logs show `QDRANT_API_KEY=set` when present.
+### System Prompt (Multi-Language)
 
-Quick connectivity test (from Qdrant docs):
+The system prompt is served at `GET /api/system-prompt`. It instructs the assistant to:
 
-```bash
-curl -sS -X GET "$QDRANT_URL" --header "api-key: $QDRANT_API_KEY"
-```
+1. **Ask language preference first** — supports 12 Indian languages
+2. Use gender-neutral, respectful addressing ("aap")
+3. Capture visit data through natural conversation (one question at a time)
+4. Detect emergency signs and suggest 108 ambulance / PHC referral
+5. Support both rural (village, sub-centre) and urban (UPHC, polyclinic) contexts
+6. Recap as structured bullets and call `send_transcript` when confirmed
 
-You should see JSON with `"title":"qdrant - vector search engine"` and a `version` field.
+### Browser SDK
 
-## Qdrant (Docker, local only)
+The frontend loads the Vapi HTML Script Tag SDK. Keys are injected server-side into meta tags (never committed to git). The browser also fetches `/api/vapi-client-config` as a fallback.
 
-From the project root:
+When a call ends, the frontend captures the transcript client-side and POSTs it to `/simulate-call` — this ensures data saves even without a public webhook (useful for local dev).
 
-```bash
-docker compose up -d
-```
+## Emergency Detection
 
-- REST API: `http://localhost:6333` (no API key)
-- Dashboard (if enabled in image): `http://localhost:6334`
+The risk engine (`backend/services/risk_engine.py`) auto-detects:
 
-Stop services:
+| Condition | Severity |
+|-----------|----------|
+| BP ≥ 180 systolic | Critical |
+| BP ≥ 160/110 (pre-eclampsia range) | Critical |
+| Hb < 5 g/dL | Critical |
+| Temperature ≥ 104°F | Critical |
+| SpO2 < 90% | Critical |
+| Blood sugar > 500 mg/dL | Critical |
+| Pulse < 40 or > 150 bpm | Critical |
+| Emergency keywords (convulsions, bleeding, chest pain, unconsciousness) | Critical |
+| Pregnancy danger signs (headache, blurred vision, swelling, reduced fetal movement) | Critical |
+| BP ≥ 160 systolic | Urgent |
+| Hb < 7 g/dL | Urgent |
+| Temperature ≥ 102°F | Urgent |
+| SpO2 < 94% | Urgent |
+| Blood sugar > 300 mg/dL | Urgent |
 
-```bash
-docker compose down
-```
+**Critical** → "IMMEDIATE: Call 108/ambulance. Refer to nearest PHC/CHC/District Hospital."
+**Urgent** → "URGENT: Refer to PHC within 2 hours. Monitor vitals."
 
-## Ollama (local LLM)
+## Portal Mapping
 
-1. Install Ollama from [ollama.com](https://ollama.com/).
-2. Start the Ollama app (daemon).
-3. Pull the model used in later tasks:
+### ANMOL/RCH (Reproductive Child Health)
+ANC registration (LMP, EDD, gravida/para, gestational weeks), visit records (BP, Hb, urine albumin/sugar, TT doses, IFA/calcium tablets), referral tracking, danger signs counseling.
 
-```bash
-ollama pull qwen3:8b
-```
+### U-WIN (Universal Immunization)
+Vaccination sessions, immunization card tracking per India's National Immunization Program schedule (BCG → OPV → Pentavalent → MR → DPT → Td), age-based auto-inference of due vaccines.
 
-Default API: `http://localhost:11434`
+### NCD/NPCDCS (Non-Communicable Disease Screening)
+CBAC-style screening, vitals with BMI calculation and category, hypertension/diabetes status classification, cancer screening fields, lab results, medicines, counseling, referral.
 
-## Frontend (static preview)
-
-Served with the API at **`/ui/`** when FastAPI is running. The HTML is **not** safe to open as a raw file for Vapi: meta tags use placeholders until the server injects values.
-
-### Vapi voice from the browser (keys out of git)
-
-1. **Local:** copy **`.env.example`** → **`.env`** in the **repo root** (next to `README.md`) or in **`backend/`** (next to `main.py`) and set:
-   - **`VAPI_PUBLIC_KEY`** — Vapi dashboard → **Public API Keys** (client-side SDK).
-   - **`VAPI_ASSISTANT_ID`** — your assistant’s id.
-2. **Render / Docker:** set the same variables in the service **Environment** (no `.env` file in the image; `.dockerignore` excludes `.env`).
-
-On each request to **`GET /ui/`**, FastAPI reads `frontend/index.html` and replaces placeholders with those env values (HTML-escaped). Boot logs show `VAPI_PUBLIC_KEY=set` / `VAPI_ASSISTANT_ID=set` when present. On load, the UI also calls **`GET /api/vapi-client-config`** so keys apply even if meta placeholders were not replaced (e.g. cached HTML).
-
-**Important:** this keeps secrets **out of the repository**. The **public** key still appears in the page response (anyone can open DevTools) — that is normal for browser SDKs; do **not** put your **private** Vapi key in the frontend or in these vars.
-
-Optional quick test: `.../ui/?vapi_pk=...&vapi_aid=...` overrides meta (avoid sharing URLs).
-
-The UI loads **`https://cdn.vapi.ai/web.js`**, then **`Start Call`** runs `new Vapi(publicKey).start(assistantId)` only when keys are configured — it does **not** fall back to **`/simulate-call`**. When the call ends, **`/vapi-webhook`** stores the visit; the app refreshes **Dashboard / History**.
-
-**Demo without Vapi:** leave the env vars unset and use **“Save demo visit (no microphone)”** ( **`/simulate-call`** ).
-
-```bash
-cd frontend && python -m http.server 3000
-```
-
-Static-only `http.server` does **not** inject env vars; use **`http://localhost:8000/ui/`** with uvicorn for full behavior.
-
-## Environment variables (summary)
+## Environment Variables (Full Reference)
 
 | Variable | Purpose |
 |----------|---------|
-| `PORT` | Set by Render on deploy; use `$PORT` in the start command. |
-| `QDRANT_URL` | Qdrant REST URL (Qdrant Cloud HTTPS, or local `http://127.0.0.1:6333`, or `:memory:`). |
-| `QDRANT_API_KEY` | [Qdrant Cloud Database API key](https://qdrant.tech/documentation/cloud/authentication/); omit for local Docker. |
-| `GEMINI_API_KEY` / `GOOGLE_API_KEY` | If set, extraction uses **Gemini** instead of Ollama. |
-| `GEMINI_MODEL` | Gemini model id (default `gemini-2.5-flash`). |
-| `SAATHI_LLM` | `gemini` or `ollama` to force one backend when debugging. |
-| `OLLAMA_BASE_URL` | Ollama base (default `http://127.0.0.1:11434`). Used when no Gemini key (or `SAATHI_LLM=ollama`). |
-| `VAPI_PUBLIC_KEY` | Vapi **public** key for the Web SDK (`/ui/` + `/api/vapi-client-config`). |
-| `VAPI_ASSISTANT_ID` | Assistant id for `vapi.start(...)`. |
+| `PORT` | Set by Render; use `$PORT` in start command |
+| `QDRANT_URL` | Qdrant REST URL (cloud HTTPS, local `http://127.0.0.1:6333`, or `:memory:`) |
+| `QDRANT_API_KEY` | Qdrant Cloud database API key; omit for local Docker |
+| `GEMINI_API_KEY` / `GOOGLE_API_KEY` | If set, extraction uses Gemini instead of Ollama |
+| `GEMINI_MODEL` | Gemini model id (default `gemini-2.5-flash`) |
+| `SAATHI_LLM` | `gemini` or `ollama` to force one backend |
+| `OLLAMA_BASE_URL` | Ollama base URL (default `http://127.0.0.1:11434`) |
+| `VAPI_PUBLIC_KEY` | Vapi public key for browser SDK |
+| `VAPI_ASSISTANT_ID` | Assistant id for `vapi.start(...)` |
+
+## Local Development (Optional Services)
+
+### Qdrant (Docker)
+
+```bash
+docker compose up -d        # REST: localhost:6333
+docker compose down          # stop
+```
+
+Not required — the app falls back to in-memory Qdrant if the remote connection fails.
+
+### Ollama (Local LLM)
+
+```bash
+ollama pull qwen3:8b         # one-time
+# Ollama daemon runs at http://localhost:11434
+```
+
+Only needed if not using Gemini (`SAATHI_LLM=ollama` or no Gemini key set).
