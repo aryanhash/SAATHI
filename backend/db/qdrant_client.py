@@ -30,8 +30,6 @@ def _client() -> QdrantClient:
         logger.info("qdrant.client mode=in_memory")
         _client_singleton = QdrantClient(path=":memory:")
     else:
-        # Qdrant Cloud: pass Database API key per
-        # https://qdrant.tech/documentation/cloud/authentication/
         api_key = (os.environ.get("QDRANT_API_KEY") or "").strip() or None
         safe_url = raw.split("@")[-1]
         logger.info(
@@ -42,7 +40,16 @@ def _client() -> QdrantClient:
         kwargs: dict[str, Any] = {"url": raw}
         if api_key:
             kwargs["api_key"] = api_key
-        _client_singleton = QdrantClient(**kwargs)
+        try:
+            client = QdrantClient(**kwargs)
+            client.get_collections()
+            _client_singleton = client
+        except Exception as e:
+            logger.warning(
+                "qdrant.client remote_failed url=%s err=%s — falling back to in-memory",
+                safe_url, e,
+            )
+            _client_singleton = QdrantClient(path=":memory:")
     return _client_singleton
 
 
