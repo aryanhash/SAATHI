@@ -577,28 +577,40 @@
           }
         }
 
+        /**
+         * Load the official Vapi HTML-script-tag SDK from jsDelivr.
+         * After load, window.vapiSDK.run() creates a vapi instance.
+         */
         function loadVapiScript() {
           if (vapiScriptLoaded) return Promise.resolve();
           return new Promise(function (resolve, reject) {
-            const s = document.createElement("script");
-            s.src = "https://cdn.vapi.ai/web.js";
+            var s = document.createElement("script");
+            s.src =
+              "https://cdn.jsdelivr.net/gh/VapiAI/html-script-tag@latest/dist/assets/index.js";
+            s.defer = true;
             s.async = true;
             s.onload = function () {
               vapiScriptLoaded = true;
               resolve();
             };
             s.onerror = function () {
-              reject(new Error("Failed to load https://cdn.vapi.ai/web.js"));
+              reject(new Error("Failed to load Vapi script from jsDelivr"));
             };
             document.head.appendChild(s);
           });
         }
 
-        function wireVapiOnce(VapiCtor) {
+        function wireVapiOnce() {
           if (vapiInstance) return vapiInstance;
-          var Ctor = VapiCtor || (typeof Vapi !== "undefined" ? Vapi : window.Vapi);
-          if (!Ctor) throw new Error("Vapi constructor not available");
-          vapiInstance = new Ctor(VAPI_PUBLIC_KEY);
+          if (!window.vapiSDK || typeof window.vapiSDK.run !== "function") {
+            throw new Error("window.vapiSDK not available after script load");
+          }
+          vapiInstance = window.vapiSDK.run({
+            apiKey: VAPI_PUBLIC_KEY,
+            assistant: VAPI_ASSISTANT_ID,
+            config: { position: "bottom-right", offset: "40px", idle: { color: "rgb(29,78,216)", type: "round", icon: "https://unpkg.com/lucide-static@0.321.0/icons/phone.svg" }, loading: { color: "rgb(59,130,246)", type: "round", icon: "https://unpkg.com/lucide-static@0.321.0/icons/loader-2.svg" }, active: { color: "rgb(220,38,38)", type: "round", icon: "https://unpkg.com/lucide-static@0.321.0/icons/phone-off.svg" } },
+          });
+          if (!vapiInstance) throw new Error("vapiSDK.run() returned null");
           vapiInstance.on("call-end", function () {
             var ec = $("end-call");
             var sc = $("start-call");
@@ -617,7 +629,7 @@
             if (ec2) ec2.classList.remove("view-hidden");
           });
           vapiInstance.on("error", function (e) {
-            const msg = (e && (e.message || e.error)) || JSON.stringify(e || {});
+            var msg = (e && (e.message || e.error)) || JSON.stringify(e || {});
             showToast("Vapi: " + String(msg).slice(0, 120));
           });
           return vapiInstance;
@@ -707,17 +719,14 @@
         on("start-call", "click", async function () {
           if (!VAPI_CONFIGURED) {
             showToast(
-              "Vapi not configured — add VAPI_PUBLIC_KEY + VAPI_ASSISTANT_ID to .env (repo root or backend/), restart server, open /ui/ on this API host. See GET /health/llm (vapi_*_present)."
+              "Vapi not configured — add VAPI_PUBLIC_KEY + VAPI_ASSISTANT_ID to .env, restart server, open /ui/ on this API host."
             );
             return;
           }
           try {
             await loadVapiScript();
-            var VapiCtor = typeof Vapi !== "undefined" ? Vapi : typeof window !== "undefined" && window.Vapi;
-            if (!VapiCtor) throw new Error("Vapi global missing after script load (expected window.Vapi)");
-            const vapi = wireVapiOnce(VapiCtor);
+            var vapi = wireVapiOnce();
             showToast("Starting voice… allow microphone if asked");
-            // Web SDK expects assistant id as a string, not { assistantId } (object = inline assistant shape).
             vapi.start(VAPI_ASSISTANT_ID);
           } catch (e) {
             showToast("Vapi: " + (e.message || e));
