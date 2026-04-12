@@ -20,15 +20,84 @@ from pydantic import BaseModel, Field
 from db.qdrant_client import create_collection, get_all_patients, get_patient_by_id, store_patient
 from llm.extractor import GEMINI_MODEL, extract_patient_data, extraction_backend
 from services.portal_mapper import build_portal_prefill
-from services.risk_engine import calculate_risk
+from services.risk_engine import calculate_risk, detect_emergency
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _BACKEND_DIR = Path(__file__).resolve().parent
-# Repo root first, then backend/.env overrides (common when .env sits next to main.py).
 load_dotenv(_REPO_ROOT / ".env")
 load_dotenv(_BACKEND_DIR / ".env", override=True)
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Multi-language system prompt for Vapi assistant
+# ---------------------------------------------------------------------------
+SAATHI_SYSTEM_PROMPT = """## Language Selection (MUST be the first thing you do)
+Greet the user and ask which language they prefer. Say:
+"Namaste didi! Main SAATHI hoon. Aap kis bhasha mein baat karna chahti hain? Hindi, English, ya koi aur?"
+"Hello! I am SAATHI. Which language would you like to speak in? Hindi, English, or another?"
+
+Wait for their response. Then continue the ENTIRE conversation in their chosen language.
+Supported: Hindi, English, Tamil, Telugu, Bengali, Kannada, Marathi, Gujarati, Malayalam, Odia, Punjabi, Assamese.
+If unsure, default to simple Hindi mixed with English medical terms.
+
+---
+
+## Identity
+Aap SAATHI hain — India mein ANM aur ASHA healthcare workers ke liye ek friendly, helpful voice assistant.
+You are SAATHI — a friendly, helpful voice assistant for ANM and ASHA healthcare workers across India.
+
+## Tone & Style
+- Always polite, warm, conversational.
+- Address the worker as "didi" (or appropriate respectful term in their language).
+- Short, clear prompts. One question at a time.
+- If the user is in a hurry, use fast mode: minimum questions, quick confirmations.
+
+## Primary Goal
+Capture patient visit details through natural conversation so didi doesn't have to type later.
+
+## Conversation Flow (be flexible)
+1) Visit context: village/area (optional), visit date/time (skip if today).
+2) Patient identification: name or initials, age, gender, phone (optional).
+3) Visit type: ANC/PNC, immunization, NCD follow-up, family planning, fever/cough, general check.
+4) Symptoms & vitals: symptoms, temperature, BP, pulse, SpO2, weight; pregnancy week if relevant.
+5) Lab results: Hb, blood sugar, urine tests if done.
+6) Findings & actions: medicines given, counseling done, immunization type/dose, referral (where/why), follow-up date.
+7) Closing: recap as bullets, confirm with didi, then ask "Aur koi visit?"
+
+## Data Hygiene
+- Never say "unknown" — politely ask or skip missing values.
+- Repeat numbers slowly for confirmation (phone, BP, sugar, Hb).
+- If ambiguous ("BP normal"), do one follow-up: exact reading or approximate.
+
+## Safety & Emergency Detection
+- DO NOT give medical advice. Only document and provide basic guidance.
+- EMERGENCY SIGNS to detect immediately:
+  * Severe breathlessness, chest pain
+  * Uncontrolled bleeding, hemorrhage
+  * Convulsions, seizures, unconsciousness
+  * Very high fever (>104°F) in infant/child
+  * Pregnancy danger signs: severe headache, blurred vision, face/hand swelling,
+    reduced fetal movement, leaking fluid, severe abdominal pain
+- On detecting ANY emergency sign:
+  1. Say clearly: "Didi, yeh emergency lag rahi hai."
+  2. Ask: "Kya ambulance ya PHC ko call karna hai? Main 108 ka number de sakti hoon."
+  3. Document the emergency and continue recording details.
+
+## Urban Context Support
+- For urban areas: recognize terms like UPHC, urban PHC, dispensary, polyclinic, corporate hospital.
+- NCD screening: ask about tobacco use, alcohol, family history of diabetes/hypertension/cancer.
+- Lifestyle counseling: diet, exercise, stress management.
+
+## Output Format
+- During call: provide structured bullet recap (Patient, Reason, Vitals, Actions, Referral/Follow-up).
+- After call: the transcript will be automatically processed — no manual data entry needed.
+
+## Tool Usage
+- When conversation is complete and didi confirms, call "send_transcript" function.
+- Pass the full conversation transcript in the function call.
+- After calling the function, do not speak further."""
 
 
 @asynccontextmanager
@@ -48,30 +117,20 @@ async def lifespan(app: FastAPI):
     logger.info(
         "saathi.boot PORT=%s QDRANT_URL=%s QDRANT_API_KEY=%s OLLAMA_BASE_URL=%s GEMINI_API_KEY=%s "
         "VAPI_PUBLIC_KEY=%s VAPI_ASSISTANT_ID=%s llm_backend=%s",
-        port,
-        qmode,
-        qdrant_key,
-        ollama,
-        gemini,
-        vapi_pk,
-        vapi_aid,
-        extraction_backend(),
+        port, qmode, qdrant_key, ollama, gemini, vapi_pk, vapi_aid, extraction_backend(),
     )
     _fp = _REPO_ROOT / "frontend" / "index.html"
     if not _fp.is_file():
-        logger.warning(
-            "saathi.frontend_missing path=%s — GET /ui/ will not work; clone full repo (not backend-only) or use Docker COPY frontend/",
-            _fp,
-        )
+        logger.warning("saathi.frontend_missing path=%s", _fp)
     try:
         create_collection()
         logger.info("saathi.boot qdrant_ok collection_ready")
     except Exception as e:
-        logger.warning("saathi.boot qdrant_skip reason=%s (stores will fail until Qdrant is reachable)", e)
+        logger.warning("saathi.boot qdrant_skip reason=%s", e)
     yield
 
 
-app = FastAPI(title="SAATHI", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="SAATHI", version="0.2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -84,7 +143,6 @@ app.add_middleware(
 
 @app.middleware("http")
 async def http_request_logging(request: Request, call_next):
-    """One-line request/response logging for Render + hackathon debugging."""
     path = request.url.path
     skip = path.startswith("/ui") or path in ("/favicon.ico",)
     client_host = request.client.host if request.client else "?"
@@ -146,19 +204,31 @@ def _run_voice_pipeline(
     )
     data = calculate_risk(extracted)
     logger.info("%s pipeline.risk risk_level=%s", log_prefix, data.get("risk_level"))
+
+    emergency = data.get("emergency", {})
+    if emergency.get("is_emergency"):
+        logger.warning(
+            "%s EMERGENCY_DETECTED severity=%s reasons=%s",
+            log_prefix,
+            emergency.get("severity"),
+            emergency.get("reasons"),
+        )
+
     if vapi_call_id:
         data["vapi_call_id"] = vapi_call_id
-        logger.info("%s pipeline.meta vapi_call_id=%s", log_prefix, vapi_call_id)
     try:
-        logger.info("%s pipeline.store start", log_prefix)
         pid = store_patient(data)
     except Exception as e:
         logger.exception("%s pipeline.store FAILED", log_prefix)
         raise HTTPException(status_code=503, detail=f"Qdrant store failed: {e}") from e
     data["patient_id"] = pid
-    logger.info("%s pipeline.complete patient_id=%s status=processed", log_prefix, pid)
+    logger.info("%s pipeline.complete patient_id=%s", log_prefix, pid)
     return {"status": "processed", "patient": data}
 
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
 
 @app.get("/", response_class=PlainTextResponse)
 def root() -> str:
@@ -167,7 +237,6 @@ def root() -> str:
 
 @app.get("/health/llm")
 def health_llm() -> dict[str, Any]:
-    """Which LLM backend this instance will use (no secrets). For Render env debugging."""
     gemini_set = bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
     return {
         "llm_backend": extraction_backend(),
@@ -181,12 +250,25 @@ def health_llm() -> dict[str, Any]:
 
 @app.get("/api/vapi-client-config")
 def vapi_client_config() -> dict[str, Any]:
-    """Browser SDK keys from env (same as injected into /ui/). Public key is not a secret; do not put private keys here."""
     pk = (os.environ.get("VAPI_PUBLIC_KEY") or "").strip()
     aid = (os.environ.get("VAPI_ASSISTANT_ID") or "").strip()
     if not pk or not aid:
         return {"configured": False}
     return {"configured": True, "publicKey": pk, "assistantId": aid}
+
+
+@app.get("/api/system-prompt")
+def get_system_prompt() -> dict[str, Any]:
+    """Return the multi-language system prompt for Vapi assistant configuration."""
+    return {
+        "prompt": SAATHI_SYSTEM_PROMPT,
+        "supported_languages": [
+            "Hindi", "English", "Tamil", "Telugu", "Bengali",
+            "Kannada", "Marathi", "Gujarati", "Malayalam",
+            "Odia", "Punjabi", "Assamese",
+        ],
+        "usage": "Copy this prompt into your Vapi Assistant's System Prompt field.",
+    }
 
 
 @app.get("/patients")
@@ -211,19 +293,75 @@ def risk_flags() -> list[dict[str, Any]]:
         return []
 
 
+@app.get("/emergencies")
+def emergencies() -> list[dict[str, Any]]:
+    """Active emergency cases — severity critical or urgent."""
+    try:
+        all_p = get_all_patients()
+        emg: list[dict[str, Any]] = []
+        for p in all_p:
+            em = p.get("emergency", {})
+            if isinstance(em, dict) and em.get("is_emergency"):
+                emg.append({
+                    "patient_id": p.get("patient_id"),
+                    "patient_name": p.get("patient_name"),
+                    "age_years": p.get("age_years"),
+                    "blood_pressure": p.get("blood_pressure"),
+                    "severity": em.get("severity"),
+                    "reasons": em.get("reasons", []),
+                    "recommended_action": em.get("recommended_action"),
+                    "detected_at": em.get("detected_at"),
+                    "location": p.get("location"),
+                    "phone": p.get("phone"),
+                })
+        emg.sort(key=lambda x: 0 if x.get("severity") == "critical" else 1)
+        return emg
+    except Exception as e:
+        logger.warning("route.emergencies failed err=%s", e)
+        return []
+
+
+@app.get("/analytics")
+def analytics() -> dict[str, Any]:
+    """Dashboard analytics: counts by risk, visit type, emergency stats."""
+    try:
+        patients = get_all_patients()
+    except Exception:
+        patients = []
+
+    total = len(patients)
+    risk_counts = {"red": 0, "amber": 0, "green": 0}
+    visit_type_counts: dict[str, int] = {}
+    emergency_count = 0
+    has_referral = 0
+
+    for p in patients:
+        rl = p.get("risk_level", "green")
+        risk_counts[rl] = risk_counts.get(rl, 0) + 1
+        vt = p.get("visit_type") or "unknown"
+        visit_type_counts[vt] = visit_type_counts.get(vt, 0) + 1
+        em = p.get("emergency", {})
+        if isinstance(em, dict) and em.get("is_emergency"):
+            emergency_count += 1
+        if p.get("referral_needed"):
+            has_referral += 1
+
+    return {
+        "total_patients": total,
+        "risk_distribution": risk_counts,
+        "visit_types": visit_type_counts,
+        "emergency_count": emergency_count,
+        "referral_count": has_referral,
+    }
+
+
 @app.get("/portal-prefill/{patient_id}")
 def portal_prefill(patient_id: str) -> dict[str, Any]:
     logger.info("route.portal_prefill lookup patient_id=%s", patient_id)
     row = get_patient_by_id(patient_id)
     if row is None:
-        logger.warning("route.portal_prefill not_found patient_id=%s", patient_id)
         raise HTTPException(status_code=404, detail="Patient not found")
     portals = build_portal_prefill(row)
-    logger.info(
-        "route.portal_prefill ok patient_id=%s program=%s",
-        patient_id,
-        portals.get("visit_program"),
-    )
     return {
         "patient_id": patient_id,
         "visit_program": portals["visit_program"],
@@ -235,18 +373,118 @@ def portal_prefill(patient_id: str) -> dict[str, Any]:
 
 @app.post("/seed-demo")
 def seed_demo() -> dict[str, Any]:
-    """Insert ~10 mock patients for hackathon demos (no LLM)."""
+    """Insert realistic demo patients covering ANC, immunization, NCD, PNC, and emergencies."""
     mocks: list[dict[str, Any]] = [
-        {"patient_name": "Sunita Sharma", "age_years": 24, "pregnancy_months": 5, "blood_pressure": "120/80", "blood_pressure_systolic": 120, "blood_pressure_diastolic": 80, "hemoglobin_g_dl": 10.5},
-        {"patient_name": "Kavita Devi", "age_years": 30, "pregnancy_months": 8, "blood_pressure": "150/95", "blood_pressure_systolic": 150, "blood_pressure_diastolic": 95, "hemoglobin_g_dl": 11.0},
-        {"patient_name": "Rahul Mehra", "age_years": 52, "blood_pressure": "142/90", "blood_pressure_systolic": 142, "blood_pressure_diastolic": 90, "hemoglobin_g_dl": 13.0, "bmi": 28.4},
-        {"patient_name": "Baby of Anita", "age_years": 0, "notes": "Immunization OPV due", "blood_pressure": None, "hemoglobin_g_dl": None},
-        {"patient_name": "Geeta Kaur", "age_years": 38, "blood_pressure": "118/76", "blood_pressure_systolic": 118, "blood_pressure_diastolic": 76, "hemoglobin_g_dl": 12.2},
-        {"patient_name": "Priya Singh", "age_years": 22, "pregnancy_months": 4, "blood_pressure": "132/84", "blood_pressure_systolic": 132, "blood_pressure_diastolic": 84, "hemoglobin_g_dl": 9.8},
-        {"patient_name": "Vikram Joshi", "age_years": 61, "blood_pressure": "138/88", "blood_pressure_systolic": 138, "blood_pressure_diastolic": 88, "random_blood_sugar_mg_dl": 142},
-        {"patient_name": "Meena Yadav", "age_years": 45, "blood_pressure": "128/82", "blood_pressure_systolic": 128, "blood_pressure_diastolic": 82, "hemoglobin_g_dl": 6.2},
-        {"patient_name": "Asha Rani", "age_years": 29, "pregnancy_months": 6, "blood_pressure": "125/78", "blood_pressure_systolic": 125, "blood_pressure_diastolic": 78, "hemoglobin_g_dl": 10.0},
-        {"patient_name": "Deepak Nair", "age_years": 55, "blood_pressure": "145/92", "blood_pressure_systolic": 145, "blood_pressure_diastolic": 92, "hemoglobin_g_dl": 14.0},
+        # ANC - Normal
+        {
+            "patient_name": "Sunita Sharma", "age_years": 24, "gender": "female",
+            "pregnancy_months": 5, "visit_type": "ANC", "location": "Rampur Village",
+            "blood_pressure": "120/80", "blood_pressure_systolic": 120, "blood_pressure_diastolic": 80,
+            "hemoglobin_g_dl": 10.5, "weight_kg": 55, "height_cm": 155,
+            "tt_doses": 1, "ifa_tablets_given": 100,
+            "counseling_done": ["nutrition", "danger signs", "birth preparedness"],
+            "follow_up_date": "2026-05-15",
+        },
+        # ANC - High Risk (pre-eclampsia)
+        {
+            "patient_name": "Kavita Devi", "age_years": 30, "gender": "female",
+            "pregnancy_months": 8, "visit_type": "ANC", "location": "Sitapur Block",
+            "blood_pressure": "155/100", "blood_pressure_systolic": 155, "blood_pressure_diastolic": 100,
+            "hemoglobin_g_dl": 8.2, "weight_kg": 62, "urine_albumin": "++",
+            "symptoms": ["headache", "swelling in feet"],
+            "referral_needed": True, "referral_facility": "District Hospital Sitapur",
+            "referral_reason": "Suspected pre-eclampsia",
+            "emergency_signs": ["severe headache", "swelling face"],
+        },
+        # NCD - Diabetes + Hypertension (Urban)
+        {
+            "patient_name": "Rahul Mehra", "age_years": 52, "gender": "male",
+            "visit_type": "NCD", "location": "Sector 15, Noida UPHC",
+            "blood_pressure": "148/92", "blood_pressure_systolic": 148, "blood_pressure_diastolic": 92,
+            "hemoglobin_g_dl": 13.0, "bmi": 28.4, "weight_kg": 82, "height_cm": 170,
+            "random_blood_sugar_mg_dl": 245, "pulse_rate": 88,
+            "medicines_given": ["Amlodipine 5mg", "Metformin 500mg"],
+            "symptoms": ["frequent urination", "blurred vision"],
+            "counseling_done": ["diet modification", "exercise", "tobacco cessation"],
+            "follow_up_date": "2026-04-26",
+        },
+        # Immunization - Baby
+        {
+            "patient_name": "Baby of Anita", "age_years": 0, "gender": "male",
+            "visit_type": "immunization", "location": "Anganwadi Centre, Lakhimpur",
+            "child_age_months": 3, "child_weight_kg": 5.2,
+            "vaccines_given": ["BCG", "OPV-0", "Hep-B Birth", "OPV-1", "Pentavalent-1", "RVV-1", "fIPV-1", "PCV-1"],
+            "vaccines_due": ["OPV-2", "Pentavalent-2", "RVV-2"],
+            "breastfeeding_status": "exclusive",
+            "notes": "Healthy infant, gaining weight well",
+            "follow_up_date": "2026-05-10",
+        },
+        # NCD - Urban elderly
+        {
+            "patient_name": "Geeta Kaur", "age_years": 58, "gender": "female",
+            "visit_type": "NCD", "location": "UPHC Janakpuri, Delhi",
+            "blood_pressure": "118/76", "blood_pressure_systolic": 118, "blood_pressure_diastolic": 76,
+            "hemoglobin_g_dl": 12.2, "random_blood_sugar_mg_dl": 110,
+            "weight_kg": 65, "height_cm": 160, "bmi": 25.4,
+            "counseling_done": ["breast self-examination", "cervical screening"],
+            "notes": "CBAC score 3 — routine follow-up",
+        },
+        # ANC - Anemia
+        {
+            "patient_name": "Priya Singh", "age_years": 22, "gender": "female",
+            "pregnancy_months": 4, "visit_type": "ANC", "location": "Bareilly CHC",
+            "blood_pressure": "132/84", "blood_pressure_systolic": 132, "blood_pressure_diastolic": 84,
+            "hemoglobin_g_dl": 6.8, "weight_kg": 48,
+            "ifa_tablets_given": 200, "calcium_tablets_given": 100,
+            "referral_needed": True, "referral_facility": "District Hospital",
+            "referral_reason": "Severe anemia — Hb 6.8 needs parenteral iron",
+        },
+        # NCD - Senior diabetes (Urban)
+        {
+            "patient_name": "Vikram Joshi", "age_years": 61, "gender": "male",
+            "visit_type": "NCD", "location": "Polyclinic Bandra, Mumbai",
+            "blood_pressure": "138/88", "blood_pressure_systolic": 138, "blood_pressure_diastolic": 88,
+            "random_blood_sugar_mg_dl": 320, "fasting_blood_sugar_mg_dl": 185,
+            "hemoglobin_g_dl": 14.0, "weight_kg": 78, "height_cm": 172,
+            "medicines_given": ["Glimepiride 2mg", "Telmisartan 40mg"],
+            "symptoms": ["tingling in feet", "excessive thirst"],
+            "diagnosis": "Uncontrolled Type 2 DM with peripheral neuropathy",
+            "referral_needed": True, "referral_facility": "Diabetology OPD, KEM Hospital",
+        },
+        # NCD - Severe anemia elderly
+        {
+            "patient_name": "Meena Yadav", "age_years": 45, "gender": "female",
+            "visit_type": "NCD", "location": "Varanasi Sub Centre",
+            "blood_pressure": "128/82", "blood_pressure_systolic": 128, "blood_pressure_diastolic": 82,
+            "hemoglobin_g_dl": 6.2, "weight_kg": 42,
+            "symptoms": ["fatigue", "breathlessness on exertion", "pallor"],
+            "medicines_given": ["Ferrous Sulphate", "Folic Acid"],
+            "referral_needed": True, "referral_facility": "CHC Varanasi",
+            "referral_reason": "Severe anemia for evaluation",
+        },
+        # PNC - Post delivery
+        {
+            "patient_name": "Asha Rani", "age_years": 29, "gender": "female",
+            "visit_type": "PNC", "location": "Lucknow PHC",
+            "blood_pressure": "125/78", "blood_pressure_systolic": 125, "blood_pressure_diastolic": 78,
+            "hemoglobin_g_dl": 10.0, "temperature_f": 98.6,
+            "breastfeeding_status": "exclusive",
+            "child_weight_kg": 3.1,
+            "counseling_done": ["breastfeeding", "family planning", "newborn care"],
+            "notes": "Day 7 PNC visit. Mother and baby healthy.",
+        },
+        # EMERGENCY - Hypertensive crisis (Urban)
+        {
+            "patient_name": "Deepak Nair", "age_years": 55, "gender": "male",
+            "visit_type": "NCD", "location": "UPHC Kochi, Kerala",
+            "blood_pressure": "185/110", "blood_pressure_systolic": 185, "blood_pressure_diastolic": 110,
+            "hemoglobin_g_dl": 14.0, "pulse_rate": 110, "spo2_percent": 93,
+            "random_blood_sugar_mg_dl": 180,
+            "symptoms": ["severe headache", "chest tightness", "dizziness"],
+            "emergency_signs": ["chest pain", "severe headache"],
+            "referral_needed": True, "referral_facility": "Government Medical College Hospital",
+            "referral_reason": "Hypertensive emergency with chest pain",
+        },
     ]
     ids: list[str] = []
     try:
@@ -265,7 +503,6 @@ def process_visit(body: ProcessVisitBody) -> dict[str, Any]:
     logger.info("route.process_visit begin chars=%s", len(body.transcript))
     extracted = _extract_llm(body.transcript)
     out = calculate_risk(extracted)
-    logger.info("route.process_visit done risk_level=%s", out.get("risk_level"))
     return out
 
 
@@ -273,61 +510,41 @@ def process_visit(body: ProcessVisitBody) -> dict[str, Any]:
 def store_patient_route(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
     if not isinstance(body, dict) or not body:
         raise HTTPException(status_code=400, detail="JSON object body required")
-    logger.info("route.store_patient keys=%s", list(body.keys()))
     try:
         pid = store_patient(body)
     except Exception as e:
         logger.exception("route.store_patient failed")
         raise HTTPException(status_code=503, detail=f"Qdrant store failed: {e}") from e
-    logger.info("route.store_patient ok patient_id=%s", pid)
     return {"status": "stored", "patient_id": pid}
 
 
 @app.post("/vapi-webhook")
 async def vapi_webhook(request: Request) -> dict[str, Any]:
-    logger.info("WEBHOOK_HIT path=/vapi-webhook (Vapi delivery received)")
+    logger.info("WEBHOOK_HIT path=/vapi-webhook")
     try:
         payload = await request.json()
     except Exception as e:
-        logger.warning("WEBHOOK json_parse_failed err=%s", e)
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}") from e
 
     if not isinstance(payload, dict):
-        logger.warning("WEBHOOK invalid_body type=%s", type(payload).__name__)
         raise HTTPException(status_code=400, detail="Body must be a JSON object")
 
     logger.info("WEBHOOK payload_keys=%s", list(payload.keys()))
-    logger.debug("WEBHOOK payload_full=%s", json.dumps(payload, default=str)[:8000])
 
-    # Vapi often sends { "transcript": "..." } with no `event` key on the final payload.
-    # We also accept explicit event == "call-ended" (and a few aliases seen in the wild).
     transcript = payload.get("transcript")
     if transcript is None or not isinstance(transcript, str):
-        logger.warning(
-            "WEBHOOK action=rejected reason=missing_transcript type=%s",
-            type(transcript).__name__,
-        )
         raise HTTPException(status_code=400, detail="Payload must include string field transcript")
     if not transcript.strip():
-        # Vapi may POST multiple times; empty transcript should not be a client error (avoid 400 + retries).
-        logger.info("WEBHOOK action=ignored reason=empty_transcript raw_len=%s", len(transcript))
         return {"status": "ignored", "reason": "empty_transcript"}
 
     event = payload.get("event")
-    logger.info("WEBHOOK event=%r", event)
     final_events = {None, "call-ended", "end-of-call-report"}
     if event not in final_events:
-        logger.info("WEBHOOK action=ignored reason=event_not_final event=%r", event)
         return {"status": "ignored", "event": event}
 
     call_block = payload.get("call")
     call_id = call_block.get("id") if isinstance(call_block, dict) else None
     call_id_str = str(call_id) if call_id is not None else None
-    logger.info(
-        "WEBHOOK action=process call_id=%s transcript_preview=%r",
-        call_id_str,
-        (transcript[:200] + "…") if len(transcript) > 200 else transcript,
-    )
 
     return _run_voice_pipeline(
         transcript.strip(),
@@ -346,12 +563,15 @@ def simulate_call(body: SimulateCallBody) -> dict[str, Any]:
     )
 
 
+# ---------------------------------------------------------------------------
+# Frontend serving with Vapi key injection
+# ---------------------------------------------------------------------------
+
 _frontend_dir = _REPO_ROOT / "frontend"
 _UI_INDEX = _frontend_dir / "index.html"
 
 
 def _inject_ui_index() -> str:
-    """Serve SPA HTML with Vapi meta tags filled from env (never commit real keys in the file)."""
     if not _UI_INDEX.is_file():
         return "<!DOCTYPE html><html><body>frontend/index.html missing</body></html>"
     raw = _UI_INDEX.read_text(encoding="utf-8")

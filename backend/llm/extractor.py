@@ -16,7 +16,6 @@ _OLLAMA_BASE = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstri
 OLLAMA_GENERATE_URL = f"{_OLLAMA_BASE}/api/generate"
 OLLAMA_MODEL = "qwen3:8b"
 
-# Default must stay on a model Google still offers to new API users (2.0-flash was retired for new keys).
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_URL = (
     f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
@@ -26,12 +25,10 @@ REQUEST_TIMEOUT_SEC = 120
 
 
 def extraction_backend() -> str:
-    """Which backend ``extract_patient_data`` will use (``gemini`` or ``ollama``)."""
     return _active_llm_backend()
 
 
 def _active_llm_backend() -> str:
-    """``gemini`` if key + not forced ollama; else ``ollama``."""
     force = (os.environ.get("SAATHI_LLM") or "").strip().lower()
     if force == "ollama":
         return "ollama"
@@ -47,20 +44,66 @@ def _gemini_api_key() -> str | None:
 
 def _build_prompt(transcript: str) -> str:
     return (
-        "Extract structured healthcare data from this transcript and return ONLY valid JSON "
+        "You are a medical data extraction system for India's public health workers (ANM/ASHA).\n"
+        "Extract ALL structured healthcare data from this transcript and return ONLY valid JSON "
         "(no markdown fences, no commentary).\n\n"
         "Use this shape; use null for anything not clearly stated:\n"
         "{\n"
         '  "patient_name": string | null,\n'
         '  "age_years": number | null,\n'
+        '  "gender": "male" | "female" | "other" | null,\n'
+        '  "phone": string | null,\n'
+        '  "location": string | null,\n'
+        '  "visit_type": "ANC" | "PNC" | "immunization" | "NCD" | "family_planning" | "general" | null,\n'
         '  "pregnancy_months": number | null,\n'
+        '  "gravida": number | null,\n'
+        '  "para": number | null,\n'
+        '  "lmp_date": string | null,\n'
+        '  "edd_date": string | null,\n'
         '  "blood_pressure": string | null,\n'
         '  "blood_pressure_systolic": number | null,\n'
         '  "blood_pressure_diastolic": number | null,\n'
         '  "hemoglobin_g_dl": number | null,\n'
-        '  "notes": string | null\n'
+        '  "weight_kg": number | null,\n'
+        '  "height_cm": number | null,\n'
+        '  "bmi": number | null,\n'
+        '  "temperature_f": number | null,\n'
+        '  "pulse_rate": number | null,\n'
+        '  "spo2_percent": number | null,\n'
+        '  "random_blood_sugar_mg_dl": number | null,\n'
+        '  "fasting_blood_sugar_mg_dl": number | null,\n'
+        '  "urine_albumin": string | null,\n'
+        '  "urine_sugar": string | null,\n'
+        '  "blood_group": string | null,\n'
+        '  "symptoms": [string] | null,\n'
+        '  "diagnosis": string | null,\n'
+        '  "medicines_given": [string] | null,\n'
+        '  "vaccines_given": [string] | null,\n'
+        '  "vaccines_due": [string] | null,\n'
+        '  "child_age_months": number | null,\n'
+        '  "child_weight_kg": number | null,\n'
+        '  "breastfeeding_status": string | null,\n'
+        '  "tt_doses": number | null,\n'
+        '  "ifa_tablets_given": number | null,\n'
+        '  "calcium_tablets_given": number | null,\n'
+        '  "referral_needed": boolean | null,\n'
+        '  "referral_facility": string | null,\n'
+        '  "referral_reason": string | null,\n'
+        '  "follow_up_date": string | null,\n'
+        '  "counseling_done": [string] | null,\n'
+        '  "emergency_signs": [string] | null,\n'
+        '  "notes": string | null,\n'
+        '  "language_used": string | null\n'
         "}\n\n"
-        f"Transcript:\n{transcript.strip()}"
+        "IMPORTANT RULES:\n"
+        "- For emergency_signs, detect: severe breathlessness, chest pain, uncontrolled bleeding, "
+        "convulsions, unconsciousness, very high fever (>104F), pregnancy danger signs "
+        "(severe headache, blurred vision, swelling, reduced fetal movement, leaking fluid).\n"
+        "- For visit_type, infer from context: pregnant woman → ANC, post-delivery → PNC, "
+        "baby/child vaccines → immunization, BP/sugar follow-up → NCD.\n"
+        "- Extract numbers carefully from Hindi/English mixed speech.\n"
+        "- If BP is mentioned as 'normal', set blood_pressure to 'normal' and leave systolic/diastolic null.\n"
+        f"\nTranscript:\n{transcript.strip()}"
     )
 
 
@@ -131,13 +174,8 @@ def _extract_with_gemini(transcript: str, api_key: str) -> dict[str, Any]:
 
 def extract_patient_data(transcript: str) -> dict[str, Any]:
     """
-    Structured extraction: **Gemini** when ``GEMINI_API_KEY`` or ``GOOGLE_API_KEY`` is set
-    (unless ``SAATHI_LLM=ollama``), otherwise **Ollama** at ``OLLAMA_BASE_URL``.
-
-    Raises:
-        requests.HTTPError: Upstream HTTP error.
-        ValueError: Invalid or empty model output.
-        requests.RequestException: Connection / timeout errors.
+    Structured extraction: Gemini when API key set, otherwise Ollama.
+    Now extracts 40+ fields for realistic ANMOL/U-WIN/NCD portal mapping.
     """
     backend = _active_llm_backend()
     if backend == "gemini":
