@@ -27,3 +27,8 @@ services:
         sync: false
       - key: GEMINI_MODEL
         sync: false
+      # Vapi Web SDK (injected into /ui/ HTML — public key only; keep private key off the client).
+      - key: VAPI_PUBLIC_KEY
+        sync: false
+      - key: VAPI_ASSISTANT_ID
+        sync: false

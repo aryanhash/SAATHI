@@ -117,13 +117,30 @@ Default API: `http://localhost:11434`
 
 ## Frontend (static preview)
 
-Open `frontend/index.html` in a browser, or serve the folder:
+Served with the API at **`/ui/`** when FastAPI is running. The HTML is **not** safe to open as a raw file for Vapi: meta tags use placeholders until the server injects values.
+
+### Vapi voice from the browser (keys out of git)
+
+1. **Local:** copy **`.env.example`** → **`.env`** in the repo root and set:
+   - **`VAPI_PUBLIC_KEY`** — Vapi dashboard → **Public API Keys** (client-side SDK).
+   - **`VAPI_ASSISTANT_ID`** — your assistant’s id.
+2. **Render / Docker:** set the same variables in the service **Environment** (no `.env` file in the image; `.dockerignore` excludes `.env`).
+
+On each request to **`GET /ui/`**, FastAPI reads `frontend/index.html` and replaces placeholders with those env values (HTML-escaped). Boot logs show `VAPI_PUBLIC_KEY=set` / `VAPI_ASSISTANT_ID=set` when present.
+
+**Important:** this keeps secrets **out of the repository**. The **public** key still appears in the page response (anyone can open DevTools) — that is normal for browser SDKs; do **not** put your **private** Vapi key in the frontend or in these vars.
+
+Optional quick test: `.../ui/?vapi_pk=...&vapi_aid=...` overrides meta (avoid sharing URLs).
+
+The UI loads **`https://cdn.vapi.ai/web.js`**, then **`Start Call`** runs `new Vapi(publicKey).start({ assistantId })`. When the call ends, **`/vapi-webhook`** stores the visit; the app refreshes **Dashboard / History**.
+
+**Demo without Vapi:** leave the env vars unset and use **“Save demo visit (no microphone)”** ( **`/simulate-call`** ).
 
 ```bash
 cd frontend && python -m http.server 3000
 ```
 
-Then visit `http://localhost:3000` (UI only until Task 9 connects the API).
+Static-only `http.server` does **not** inject env vars; use **`http://localhost:8000/ui/`** with uvicorn for full behavior.
 
 ## Environment variables (summary)
 

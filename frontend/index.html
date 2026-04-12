@@ -6,9 +6,9 @@
     <meta name="theme-color" content="#1d4ed8" />
     <!-- API base (leave empty when served from same host as FastAPI, e.g. /ui on Render) -->
     <meta name="saathi-api" content="" />
-    <!-- Vapi Web: public key + assistant id (or use ?vapi_pk=...&vapi_aid=... for quick demos only) -->
-    <meta name="vapi-public-key" content="" />
-    <meta name="vapi-assistant-id" content="" />
+    <!-- Vapi Web: injected at serve time from VAPI_PUBLIC_KEY / VAPI_ASSISTANT_ID (see README). Query ?vapi_pk= / ?vapi_aid= still override. -->
+    <meta name="vapi-public-key" content="__INJECT_VAPI_PUBLIC_KEY__" />
+    <meta name="vapi-assistant-id" content="__INJECT_VAPI_ASSISTANT_ID__" />
     <title>SAATHI</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>

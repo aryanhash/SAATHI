@@ -2,24 +2,28 @@
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import requests
+from dotenv import load_dotenv
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
-from fastapi.staticfiles import StaticFiles
-from pathlib import Path
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from db.qdrant_client import create_collection, get_all_patients, get_patient_by_id, store_patient
 from llm.extractor import GEMINI_MODEL, extract_patient_data, extraction_backend
 from services.portal_mapper import build_portal_prefill
 from services.risk_engine import calculate_risk
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(_REPO_ROOT / ".env")
 
 logger = logging.getLogger(__name__)
 
@@ -36,13 +40,18 @@ async def lifespan(app: FastAPI):
     ollama = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434 (default)")
     gemini = "set" if (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")) else "unset"
     qdrant_key = "set" if os.environ.get("QDRANT_API_KEY") else "unset"
+    vapi_pk = "set" if os.environ.get("VAPI_PUBLIC_KEY") else "unset"
+    vapi_aid = "set" if os.environ.get("VAPI_ASSISTANT_ID") else "unset"
     logger.info(
-        "saathi.boot PORT=%s QDRANT_URL=%s QDRANT_API_KEY=%s OLLAMA_BASE_URL=%s GEMINI_API_KEY=%s llm_backend=%s",
+        "saathi.boot PORT=%s QDRANT_URL=%s QDRANT_API_KEY=%s OLLAMA_BASE_URL=%s GEMINI_API_KEY=%s "
+        "VAPI_PUBLIC_KEY=%s VAPI_ASSISTANT_ID=%s llm_backend=%s",
         port,
         qmode,
         qdrant_key,
         ollama,
         gemini,
+        vapi_pk,
+        vapi_aid,
         extraction_backend(),
     )
     try:
@@ -316,6 +325,30 @@ def simulate_call(body: SimulateCallBody) -> dict[str, Any]:
     )
 
 
-_frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
-if _frontend_dir.is_dir():
-    app.mount("/ui", StaticFiles(directory=str(_frontend_dir), html=True), name="ui")
+_frontend_dir = _REPO_ROOT / "frontend"
+_UI_INDEX = _frontend_dir / "index.html"
+
+
+def _inject_ui_index() -> str:
+    """Serve SPA HTML with Vapi meta tags filled from env (never commit real keys in the file)."""
+    if not _UI_INDEX.is_file():
+        return "<!DOCTYPE html><html><body>frontend/index.html missing</body></html>"
+    raw = _UI_INDEX.read_text(encoding="utf-8")
+    pk = html.escape(os.environ.get("VAPI_PUBLIC_KEY", ""), quote=True)
+    aid = html.escape(os.environ.get("VAPI_ASSISTANT_ID", ""), quote=True)
+    return raw.replace("__INJECT_VAPI_PUBLIC_KEY__", pk).replace("__INJECT_VAPI_ASSISTANT_ID__", aid)
+
+
+@app.get("/ui", include_in_schema=False)
+def ui_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/ui/", status_code=307)
+
+
+@app.get("/ui/", include_in_schema=False, response_class=HTMLResponse)
+def ui_index() -> HTMLResponse:
+    return HTMLResponse(_inject_ui_index())
+
+
+@app.get("/ui/index.html", include_in_schema=False, response_class=HTMLResponse)
+def ui_index_file() -> HTMLResponse:
+    return HTMLResponse(_inject_ui_index())
