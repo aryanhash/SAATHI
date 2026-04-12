@@ -16,7 +16,8 @@ _OLLAMA_BASE = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstri
 OLLAMA_GENERATE_URL = f"{_OLLAMA_BASE}/api/generate"
 OLLAMA_MODEL = "qwen3:8b"
 
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+# Default must stay on a model Google still offers to new API users (2.0-flash was retired for new keys).
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_URL = (
     f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 )

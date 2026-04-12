@@ -61,7 +61,7 @@ Dashboard UI (same server): `http://localhost:8000/ui/`
    - **`QDRANT_URL`** — cluster HTTPS URL from [Qdrant Cloud](https://cloud.qdrant.io/) (same host you use in `curl`; often ends with `:6333` for REST).
    - **`QDRANT_API_KEY`** — **Database API key** from the cluster (create under **API Keys** on the cluster detail page). Qdrant expects this on every request as header `api-key` or `Authorization: Bearer …`; the Python client sends it when you pass `api_key=` (see [Authentication](https://qdrant.tech/documentation/cloud/authentication/)).
    - **`GEMINI_API_KEY`** (or **`GOOGLE_API_KEY`**) — so extraction uses **Gemini** on the public internet (recommended on Render).
-   - Optional **`GEMINI_MODEL`** — default is `gemini-2.0-flash` (override if your project uses another model name).
+   - Optional **`GEMINI_MODEL`** — default in code is `gemini-2.5-flash` (Google retired `gemini-2.0-flash` for new API users).
    - **`SAATHI_LLM=ollama`** — only if you intentionally want Ollama instead of Gemini when both could be configured.
    - **`OLLAMA_BASE_URL`** — only for remote Ollama; not required when Gemini is configured.
 4. After deploy, set Vapi’s webhook to:
