@@ -368,9 +368,25 @@
           getMeta("saathi-api") || window.location.origin
         ).replace(/\/$/, "");
 
-        const VAPI_PUBLIC_KEY = vapiCredential(qs.get("vapi_pk")) || vapiCredential(getMeta("vapi-public-key"));
-        const VAPI_ASSISTANT_ID = vapiCredential(qs.get("vapi_aid")) || vapiCredential(getMeta("vapi-assistant-id"));
-        const VAPI_CONFIGURED = !!(VAPI_PUBLIC_KEY && VAPI_ASSISTANT_ID);
+        let VAPI_PUBLIC_KEY = vapiCredential(qs.get("vapi_pk")) || vapiCredential(getMeta("vapi-public-key"));
+        let VAPI_ASSISTANT_ID = vapiCredential(qs.get("vapi_aid")) || vapiCredential(getMeta("vapi-assistant-id"));
+        let VAPI_CONFIGURED = !!(VAPI_PUBLIC_KEY && VAPI_ASSISTANT_ID);
+
+        async function bootstrapVapiFromServer() {
+          if (VAPI_CONFIGURED) return;
+          try {
+            const r = await fetch(API_BASE + "/api/vapi-client-config");
+            if (!r.ok) return;
+            const j = await r.json();
+            if (j && j.configured && j.publicKey && j.assistantId) {
+              VAPI_PUBLIC_KEY = String(j.publicKey);
+              VAPI_ASSISTANT_ID = String(j.assistantId);
+              VAPI_CONFIGURED = true;
+            }
+          } catch (_) {
+            /* e.g. file:// or API down */
+          }
+        }
 
         const $ = (id) => document.getElementById(id);
         const views = {
@@ -674,7 +690,7 @@
         $("start-call").addEventListener("click", async function () {
           if (!VAPI_CONFIGURED) {
             showToast(
-              "Vapi not configured — set VAPI_PUBLIC_KEY + VAPI_ASSISTANT_ID and open /ui/ from the API. Use “Save demo visit” to test without a call."
+              "Vapi not configured — add VAPI_PUBLIC_KEY + VAPI_ASSISTANT_ID to .env (repo root or backend/), restart server, open /ui/ on this API host. See GET /health/llm (vapi_*_present)."
             );
             return;
           }
@@ -763,9 +779,11 @@
           showView("dashboard");
         });
 
-        initVapiUi();
-        showView("home");
-        loadDashboard();
+        bootstrapVapiFromServer().then(function () {
+          initVapiUi();
+          showView("home");
+          loadDashboard();
+        });
       })();
     </script>
   </body>

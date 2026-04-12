@@ -121,18 +121,18 @@ Served with the API at **`/ui/`** when FastAPI is running. The HTML is **not** s
 
 ### Vapi voice from the browser (keys out of git)
 
-1. **Local:** copy **`.env.example`** → **`.env`** in the repo root and set:
+1. **Local:** copy **`.env.example`** → **`.env`** in the **repo root** (next to `README.md`) or in **`backend/`** (next to `main.py`) and set:
    - **`VAPI_PUBLIC_KEY`** — Vapi dashboard → **Public API Keys** (client-side SDK).
    - **`VAPI_ASSISTANT_ID`** — your assistant’s id.
 2. **Render / Docker:** set the same variables in the service **Environment** (no `.env` file in the image; `.dockerignore` excludes `.env`).
 
-On each request to **`GET /ui/`**, FastAPI reads `frontend/index.html` and replaces placeholders with those env values (HTML-escaped). Boot logs show `VAPI_PUBLIC_KEY=set` / `VAPI_ASSISTANT_ID=set` when present.
+On each request to **`GET /ui/`**, FastAPI reads `frontend/index.html` and replaces placeholders with those env values (HTML-escaped). Boot logs show `VAPI_PUBLIC_KEY=set` / `VAPI_ASSISTANT_ID=set` when present. On load, the UI also calls **`GET /api/vapi-client-config`** so keys apply even if meta placeholders were not replaced (e.g. cached HTML).
 
 **Important:** this keeps secrets **out of the repository**. The **public** key still appears in the page response (anyone can open DevTools) — that is normal for browser SDKs; do **not** put your **private** Vapi key in the frontend or in these vars.
 
 Optional quick test: `.../ui/?vapi_pk=...&vapi_aid=...` overrides meta (avoid sharing URLs).
 
-The UI loads **`https://cdn.vapi.ai/web.js`**, then **`Start Call`** runs `new Vapi(publicKey).start({ assistantId })` only when keys are configured — it does **not** fall back to **`/simulate-call`**. When the call ends, **`/vapi-webhook`** stores the visit; the app refreshes **Dashboard / History**.
+The UI loads **`https://cdn.vapi.ai/web.js`**, then **`Start Call`** runs `new Vapi(publicKey).start(assistantId)` only when keys are configured — it does **not** fall back to **`/simulate-call`**. When the call ends, **`/vapi-webhook`** stores the visit; the app refreshes **Dashboard / History**.
 
 **Demo without Vapi:** leave the env vars unset and use **“Save demo visit (no microphone)”** ( **`/simulate-call`** ).
 

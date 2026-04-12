@@ -23,7 +23,10 @@ from services.portal_mapper import build_portal_prefill
 from services.risk_engine import calculate_risk
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+_BACKEND_DIR = Path(__file__).resolve().parent
+# Repo root first, then backend/.env overrides (common when .env sits next to main.py).
 load_dotenv(_REPO_ROOT / ".env")
+load_dotenv(_BACKEND_DIR / ".env", override=True)
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +168,19 @@ def health_llm() -> dict[str, Any]:
         "gemini_key_present": gemini_set,
         "gemini_model": GEMINI_MODEL,
         "saathi_llm_env": os.environ.get("SAATHI_LLM"),
+        "vapi_public_key_present": bool((os.environ.get("VAPI_PUBLIC_KEY") or "").strip()),
+        "vapi_assistant_id_present": bool((os.environ.get("VAPI_ASSISTANT_ID") or "").strip()),
     }
+
+
+@app.get("/api/vapi-client-config")
+def vapi_client_config() -> dict[str, Any]:
+    """Browser SDK keys from env (same as injected into /ui/). Public key is not a secret; do not put private keys here."""
+    pk = (os.environ.get("VAPI_PUBLIC_KEY") or "").strip()
+    aid = (os.environ.get("VAPI_ASSISTANT_ID") or "").strip()
+    if not pk or not aid:
+        return {"configured": False}
+    return {"configured": True, "publicKey": pk, "assistantId": aid}
 
 
 @app.get("/patients")
