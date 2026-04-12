@@ -90,19 +90,24 @@ class SimulateCallBody(BaseModel):
     transcript: str = Field(..., min_length=1)
 
 
-def _extract_ollama(transcript: str) -> dict[str, Any]:
-    logger.info("pipeline.extract start chars=%s", len(transcript))
+def _extract_llm(transcript: str) -> dict[str, Any]:
+    logger.info("pipeline.extract start chars=%s backend=%s", len(transcript), extraction_backend())
     try:
         out = extract_patient_data(transcript)
         logger.info("pipeline.extract done keys=%s", list(out.keys()))
         return out
     except requests.HTTPError as e:
+        code = e.response.status_code if e.response is not None else "?"
+        hint = (e.response.text[:240] + "…") if e.response is not None and e.response.text else ""
         raise HTTPException(
             status_code=502,
-            detail=f"Ollama HTTP error: {e.response.status_code if e.response is not None else e}",
+            detail=f"LLM HTTP error ({extraction_backend()}): status={code} {hint}".strip(),
         ) from e
     except requests.RequestException as e:
-        raise HTTPException(status_code=503, detail=f"Cannot reach Ollama: {e}") from e
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cannot reach LLM ({extraction_backend()}): {e}",
+        ) from e
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
@@ -115,7 +120,7 @@ def _run_voice_pipeline(
 ) -> dict[str, Any]:
     logger.info("%s pipeline.begin transcript_chars=%s", log_prefix, len(transcript))
     logger.info("%s pipeline.transcript %s", log_prefix, transcript)
-    extracted = _extract_ollama(transcript)
+    extracted = _extract_llm(transcript)
     logger.info(
         "%s pipeline.extracted_json %s",
         log_prefix,
@@ -228,7 +233,7 @@ def seed_demo() -> dict[str, Any]:
 @app.post("/process-visit")
 def process_visit(body: ProcessVisitBody) -> dict[str, Any]:
     logger.info("route.process_visit begin chars=%s", len(body.transcript))
-    extracted = _extract_ollama(body.transcript)
+    extracted = _extract_llm(body.transcript)
     out = calculate_risk(extracted)
     logger.info("route.process_visit done risk_level=%s", out.get("risk_level"))
     return out
