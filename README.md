@@ -8,7 +8,7 @@ Voice-first healthcare MVP: ANM workers speak patient details; the system extrac
 Vapi  →  Render (FastAPI)  →  Gemini API  →  Qdrant Cloud
 ```
 
-1. **Vapi** ends a call and `POST`s the transcript to `https://<your-app>.onrender.com/vapi-webhook`.
+1. **Vapi** `POST`s to `https://<your-app>.onrender.com/vapi-webhook` with a **`transcript`** string. The handler runs when `event` is missing, **`call-ended`**, or **`end-of-call-report`** (Vapi often sends transcript-only JSON with no `event`).
 2. **Render** runs this repo’s FastAPI service (`$PORT`, `0.0.0.0`).
 3. **Gemini** runs structured JSON extraction when `GEMINI_API_KEY` or `GOOGLE_API_KEY` is set (see below). Without a key, the app uses **Ollama** at `OLLAMA_BASE_URL` (typical for local dev only).
 4. **Qdrant Cloud** (or any reachable Qdrant) is configured with **`QDRANT_URL`** so visits persist after deploy.
