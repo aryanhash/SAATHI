@@ -404,6 +404,7 @@
         let portalData = null;
         let vapiScriptLoaded = false;
         let vapiInstance = null;
+        let callTranscriptParts = [];
 
         function showToast(msg) {
           const t = $("toast");
@@ -611,23 +612,59 @@
             config: { position: "bottom-right", offset: "40px", idle: { color: "rgb(29,78,216)", type: "round", icon: "https://unpkg.com/lucide-static@0.321.0/icons/phone.svg" }, loading: { color: "rgb(59,130,246)", type: "round", icon: "https://unpkg.com/lucide-static@0.321.0/icons/loader-2.svg" }, active: { color: "rgb(220,38,38)", type: "round", icon: "https://unpkg.com/lucide-static@0.321.0/icons/phone-off.svg" } },
           });
           if (!vapiInstance) throw new Error("vapiSDK.run() returned null");
-          vapiInstance.on("call-end", function () {
-            var ec = $("end-call");
-            var sc = $("start-call");
-            if (ec) ec.classList.add("view-hidden");
-            if (sc) sc.classList.remove("view-hidden");
-            setReady("READY");
-            showToast("Call ended — refreshing visits");
-            loadDashboard();
-            showView("dashboard");
-          });
+
           vapiInstance.on("call-start", function () {
+            callTranscriptParts = [];
             setReady("LIVE");
             var sc2 = $("start-call");
             var ec2 = $("end-call");
             if (sc2) sc2.classList.add("view-hidden");
             if (ec2) ec2.classList.remove("view-hidden");
           });
+
+          vapiInstance.on("message", function (msg) {
+            if (msg && msg.type === "transcript" && msg.transcriptType === "final" && msg.transcript) {
+              callTranscriptParts.push(msg.transcript);
+            }
+          });
+
+          vapiInstance.on("call-end", function () {
+            var ec = $("end-call");
+            var sc = $("start-call");
+            if (ec) ec.classList.add("view-hidden");
+            if (sc) sc.classList.remove("view-hidden");
+            setReady("SAVING");
+
+            var fullTranscript = callTranscriptParts.join(" ").trim();
+            callTranscriptParts = [];
+
+            if (fullTranscript.length > 0) {
+              showToast("Call ended — saving visit data…");
+              api("/simulate-call", {
+                method: "POST",
+                body: JSON.stringify({ transcript: fullTranscript }),
+              })
+                .then(function (res) {
+                  var name = res && res.patient && res.patient.patient_name;
+                  showToast("Saved · " + (name || "OK") + " — opening dashboard");
+                  setReady("READY");
+                  loadDashboard();
+                  showView("dashboard");
+                })
+                .catch(function (e) {
+                  showToast("Save error: " + (e.message || e));
+                  setReady("READY");
+                  loadDashboard();
+                  showView("dashboard");
+                });
+            } else {
+              showToast("Call ended — no transcript captured (too short?)");
+              setReady("READY");
+              loadDashboard();
+              showView("dashboard");
+            }
+          });
+
           vapiInstance.on("error", function (e) {
             var msg = (e && (e.message || e.error)) || JSON.stringify(e || {});
             showToast("Vapi: " + String(msg).slice(0, 120));
@@ -644,7 +681,7 @@
             chip.className =
               "mt-2 inline-block rounded-full bg-emerald-100 px-3 py-0.5 text-[11px] font-semibold text-emerald-800";
             hint.textContent =
-              "Start Call opens the Vapi voice widget. When you hang up, your Render webhook stores the visit.";
+              "Start Call opens the Vapi voice widget. When you hang up, the transcript is sent to your backend and the visit is saved.";
             $("start-call-label").textContent = "Start Call";
           } else {
             chip.textContent = "Demo mode (no Vapi keys)";
