@@ -132,7 +132,7 @@ On each request to **`GET /ui/`**, FastAPI reads `frontend/index.html` and repla
 
 Optional quick test: `.../ui/?vapi_pk=...&vapi_aid=...` overrides meta (avoid sharing URLs).
 
-The UI loads **`https://cdn.vapi.ai/web.js`**, then **`Start Call`** runs `new Vapi(publicKey).start({ assistantId })`. When the call ends, **`/vapi-webhook`** stores the visit; the app refreshes **Dashboard / History**.
+The UI loads **`https://cdn.vapi.ai/web.js`**, then **`Start Call`** runs `new Vapi(publicKey).start({ assistantId })` only when keys are configured — it does **not** fall back to **`/simulate-call`**. When the call ends, **`/vapi-webhook`** stores the visit; the app refreshes **Dashboard / History**.
 
 **Demo without Vapi:** leave the env vars unset and use **“Save demo visit (no microphone)”** ( **`/simulate-call`** ).
 

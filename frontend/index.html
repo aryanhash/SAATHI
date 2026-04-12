@@ -356,13 +356,20 @@
           return (m && m.getAttribute("content") && m.getAttribute("content").trim()) || "";
         }
 
+        /** Unreplaced server placeholders or empty → not configured (avoid fake "configured" on file://). */
+        function vapiCredential(raw) {
+          const t = (raw || "").trim();
+          if (!t || t.indexOf("__INJECT_VAPI_") !== -1) return "";
+          return t;
+        }
+
         const qs = new URLSearchParams(window.location.search);
         const API_BASE = (
           getMeta("saathi-api") || window.location.origin
         ).replace(/\/$/, "");
 
-        const VAPI_PUBLIC_KEY = qs.get("vapi_pk") || getMeta("vapi-public-key");
-        const VAPI_ASSISTANT_ID = qs.get("vapi_aid") || getMeta("vapi-assistant-id");
+        const VAPI_PUBLIC_KEY = vapiCredential(qs.get("vapi_pk")) || vapiCredential(getMeta("vapi-public-key"));
+        const VAPI_ASSISTANT_ID = vapiCredential(qs.get("vapi_aid")) || vapiCredential(getMeta("vapi-assistant-id"));
         const VAPI_CONFIGURED = !!(VAPI_PUBLIC_KEY && VAPI_ASSISTANT_ID);
 
         const $ = (id) => document.getElementById(id);
@@ -598,8 +605,8 @@
             chip.className =
               "mt-2 inline-block rounded-full bg-slate-200 px-3 py-0.5 text-[11px] font-semibold text-slate-600";
             hint.textContent =
-              "Set meta vapi-public-key + vapi-assistant-id (or ?vapi_pk=…&vapi_aid=…) to call via Vapi. Otherwise use demo save.";
-            $("start-call-label").textContent = "Demo visit";
+              "Set VAPI_PUBLIC_KEY + VAPI_ASSISTANT_ID in .env or Render, then open this app at /ui/ on the API host. Start Call does not save a demo — use the link below for that.";
+            $("start-call-label").textContent = "Start Call";
           }
         }
 
@@ -663,19 +670,21 @@
         });
 
         $("start-call").addEventListener("click", async function () {
-          if (VAPI_CONFIGURED) {
-            try {
-              await loadVapiScript();
-              if (typeof Vapi === "undefined") throw new Error("Vapi global missing after script load");
-              const vapi = wireVapiOnce();
-              showToast("Starting voice… allow microphone if asked");
-              vapi.start({ assistantId: VAPI_ASSISTANT_ID });
-            } catch (e) {
-              showToast("Vapi: " + (e.message || e));
-            }
+          if (!VAPI_CONFIGURED) {
+            showToast(
+              "Vapi not configured — set VAPI_PUBLIC_KEY + VAPI_ASSISTANT_ID and open /ui/ from the API. Use “Save demo visit” to test without a call."
+            );
             return;
           }
-          runDemoSimulate();
+          try {
+            await loadVapiScript();
+            if (typeof Vapi === "undefined") throw new Error("Vapi global missing after script load");
+            const vapi = wireVapiOnce();
+            showToast("Starting voice… allow microphone if asked");
+            vapi.start({ assistantId: VAPI_ASSISTANT_ID });
+          } catch (e) {
+            showToast("Vapi: " + (e.message || e));
+          }
         });
 
         function portalBlurb(tab) {
