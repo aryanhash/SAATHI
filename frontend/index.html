@@ -895,7 +895,22 @@
             await loadVapiScript();
             var vapi = wireVapiOnce();
             showToast("Starting voice… allow microphone if asked");
-            vapi.start(VAPI_ASSISTANT_ID);
+            var systemPrompt = null;
+            try {
+              var pr = await fetch(API_BASE + "/api/system-prompt");
+              if (pr.ok) { var pj = await pr.json(); systemPrompt = pj.prompt; }
+            } catch (_) {}
+            if (systemPrompt) {
+              vapi.start({
+                assistantId: VAPI_ASSISTANT_ID,
+                assistantOverrides: {
+                  firstMessage: "Namaste! Main SAATHI hoon — aapka health assistant. Aap kis bhasha mein baat karna chahenge? Hindi, English, Tamil, Telugu, Bengali, Kannada, Marathi, Gujarati, Malayalam, Odia, Punjabi, ya Assamese?",
+                  model: { messages: [{ role: "system", content: systemPrompt }] }
+                }
+              });
+            } else {
+              vapi.start(VAPI_ASSISTANT_ID);
+            }
           } catch (e) {
             showToast("Vapi: " + (e.message || e));
           }
