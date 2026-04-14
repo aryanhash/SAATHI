@@ -416,6 +416,18 @@
         var vapiScriptLoaded = false;
         var vapiInstance = null;
         var callTranscriptParts = [];
+        var cachedSystemPrompt = null;
+        var cachedFirstMessage = null;
+
+        // Pre-fetch system prompt for Vapi overrides
+        (function prefetchPrompt() {
+          fetch(API_BASE + "/api/system-prompt")
+            .then(function(r) { return r.ok ? r.json() : null; })
+            .then(function(j) {
+              if (j && j.prompt) { cachedSystemPrompt = j.prompt; cachedFirstMessage = j.firstMessage; }
+            })
+            .catch(function() {});
+        })();
 
         function showToast(msg) {
           var t = $("toast");
@@ -734,7 +746,7 @@
           if (!window.vapiSDK || typeof window.vapiSDK.run !== "function") {
             throw new Error("window.vapiSDK not available");
           }
-          vapiInstance = window.vapiSDK.run({
+          var runOpts = {
             apiKey: VAPI_PUBLIC_KEY,
             assistant: VAPI_ASSISTANT_ID,
             config: {
@@ -743,8 +755,25 @@
               loading: { color: "rgb(59,130,246)", type: "round", icon: "https://unpkg.com/lucide-static@0.321.0/icons/loader-2.svg" },
               active: { color: "rgb(220,38,38)", type: "round", icon: "https://unpkg.com/lucide-static@0.321.0/icons/phone-off.svg" },
             },
-          });
+          };
+          if (cachedFirstMessage || cachedSystemPrompt) {
+            runOpts.assistantOverrides = {};
+            if (cachedFirstMessage) runOpts.assistantOverrides.firstMessage = cachedFirstMessage;
+            if (cachedSystemPrompt) runOpts.assistantOverrides.model = { messages: [{ role: "system", content: cachedSystemPrompt }] };
+          }
+          vapiInstance = window.vapiSDK.run(runOpts);
           if (!vapiInstance) throw new Error("vapiSDK.run() returned null");
+          // Hide the floating Vapi widget — big button is the primary trigger
+          setTimeout(function() {
+            var els = document.querySelectorAll("div[id^='vapi'], button[id^='vapi']");
+            els.forEach(function(el) { el.style.display = "none"; });
+            document.querySelectorAll("body > div").forEach(function(el) {
+              var s = el.style;
+              if (s.position === "fixed" && s.zIndex && parseInt(s.zIndex) > 9000) {
+                el.style.display = "none";
+              }
+            });
+          }, 500);
 
           vapiInstance.on("call-start", function () {
             callTranscriptParts = [];
@@ -895,27 +924,7 @@
             await loadVapiScript();
             var vapi = wireVapiOnce();
             showToast("Starting voice… allow microphone if asked");
-            var systemPrompt = null;
-            var firstMsg = null;
-            try {
-              var pr = await fetch(API_BASE + "/api/system-prompt");
-              if (pr.ok) {
-                var pj = await pr.json();
-                systemPrompt = pj.prompt;
-                firstMsg = pj.firstMessage;
-              }
-            } catch (_) {}
-            if (systemPrompt && firstMsg) {
-              vapi.start({
-                assistantId: VAPI_ASSISTANT_ID,
-                assistantOverrides: {
-                  firstMessage: firstMsg,
-                  model: { messages: [{ role: "system", content: systemPrompt }] }
-                }
-              });
-            } else {
-              vapi.start(VAPI_ASSISTANT_ID);
-            }
+            vapi.start(VAPI_ASSISTANT_ID);
           } catch (e) {
             showToast("Vapi: " + (e.message || e));
           }
