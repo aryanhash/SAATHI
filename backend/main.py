@@ -56,6 +56,7 @@ and conversations naturally, respectfully, and efficiently, reducing reliance on
   1 = Hindi, 2 = English, 3 = Tamil, 4 = Telugu, 5 = Bengali,
   6 = Kannada, 7 = Marathi, 8 = Gujarati, 9 = Malayalam,
   10 = Odia, 11 = Punjabi, 12 = Assamese.
+- The user may say the number, the language name, or respond in that language — all are valid.
 - Once confirmed, conduct the ENTIRE rest of the conversation in that language only.
 - Default: if user does not pick or is unclear, ask once more; if still unclear, use Hindi.
 - If user requests an unsupported language, say: "Sorry, woh language abhi support nahi hai. \
@@ -148,20 +149,20 @@ conversation transcript.
 - Once "send_transcript" is triggered and sent, end the conversation silently."""
 
 SAATHI_FIRST_MESSAGE = (
-    "Namaste! Main SAATHI hoon — aapka health assistant. "
-    "Apni bhasha chuniye: "
-    "Hindi ke liye 1 bolein, "
-    "English ke liye 2, "
-    "Tamil ke liye 3, "
-    "Telugu ke liye 4, "
-    "Bengali ke liye 5, "
-    "Kannada ke liye 6, "
-    "Marathi ke liye 7, "
-    "Gujarati ke liye 8, "
-    "Malayalam ke liye 9, "
-    "Odia ke liye 10, "
-    "Punjabi ke liye 11, "
-    "Assamese ke liye 12."
+    "Welcome to SAATHI — your health assistant. "
+    "हिंदी के लिए 1 बोलें। "
+    "For English, say 2. "
+    "தமிழுக்கு 3 சொல்லுங்கள். "
+    "తెలుగుకు 4 చెప్పండి. "
+    "বাংলার জন্য 5 বলুন। "
+    "ಕನ್ನಡಕ್ಕಾಗಿ 6 ಹೇಳಿ. "
+    "मराठीसाठी 7 बोला. "
+    "ગુજરાતી માટે 8 બોલો. "
+    "മലയാളത്തിന് 9 പറയൂ. "
+    "ଓଡ଼ିଆ ପାଇଁ 10 କୁହନ୍ତୁ। "
+    "ਪੰਜਾਬੀ ਲਈ 11 ਬੋਲੋ। "
+    "অসমীয়াৰ বাবে 12 কওক। "
+    "Please select your preferred language."
 )
 
 
