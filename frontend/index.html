@@ -596,7 +596,7 @@
           var emBan = $("emergency-banner");
           if (emergencies && emergencies.length > 0) {
             var topE = emergencies[0];
-            $("emergency-text").textContent = esc(topE.patient_name || "Patient") + " — " + esc((topE.reasons || []).join(", "));
+            $("emergency-text").textContent = (topE.patient_name || "Patient") + " — " + (topE.reasons || []).join(", ");
             $("emergency-action").textContent = topE.recommended_action || "";
             emBan.classList.remove("view-hidden");
           } else {
