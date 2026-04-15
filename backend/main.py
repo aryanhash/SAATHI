@@ -321,15 +321,39 @@ def vapi_client_config() -> dict[str, Any]:
 
 @app.get("/api/system-prompt")
 def get_system_prompt() -> dict[str, Any]:
-    """Return the multi-language system prompt and first message for Vapi assistant."""
-    return {
-        "prompt": SAATHI_SYSTEM_PROMPT,
-        "firstMessage": SAATHI_FIRST_MESSAGE,
-        "supported_languages": [
-            "Hindi", "English", "Kannada", "Tamil", "Telugu",
-        ],
-        "usage": "These are automatically applied as Vapi assistant overrides when starting a call.",
-    }
+    """Return the multi-language system prompt and first message for Vapi assistant.
+
+    Always returns a valid response with at least the default prompt so that
+    callers (e.g. the frontend ``prefetchPrompt``) never receive an error or
+    empty body.  If a future version loads the prompt from an external source,
+    any failure will be caught and the built-in default will be returned instead.
+    """
+    try:
+        prompt = SAATHI_SYSTEM_PROMPT
+        first_message = SAATHI_FIRST_MESSAGE
+        if not prompt:
+            logger.warning("system_prompt.empty falling back to default")
+            prompt = SAATHI_SYSTEM_PROMPT
+            first_message = SAATHI_FIRST_MESSAGE
+        return {
+            "prompt": prompt,
+            "firstMessage": first_message,
+            "supported_languages": [
+                "Hindi", "English", "Kannada", "Tamil", "Telugu",
+            ],
+            "usage": "These are automatically applied as Vapi assistant overrides when starting a call.",
+        }
+    except Exception as exc:
+        logger.exception("system_prompt.error falling back to default: %s", exc)
+        return {
+            "prompt": SAATHI_SYSTEM_PROMPT,
+            "firstMessage": SAATHI_FIRST_MESSAGE,
+            "supported_languages": [
+                "Hindi", "English", "Kannada", "Tamil", "Telugu",
+            ],
+            "usage": "These are automatically applied as Vapi assistant overrides when starting a call.",
+            "fallback": True,
+        }
 
 
 @app.get("/patients")
