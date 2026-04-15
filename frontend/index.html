@@ -379,11 +379,22 @@
           return t;
         }
 
-        var qs = new URLSearchParams(window.location.search);
+        /** Escape HTML entities to prevent XSS when building innerHTML strings. */
+        function esc(str) {
+          if (str == null) return "";
+          return String(str)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+        }
+
         var API_BASE = (getMeta("saathi-api") || window.location.origin).replace(/\/$/, "");
 
-        var VAPI_PUBLIC_KEY = vapiCredential(qs.get("vapi_pk")) || vapiCredential(getMeta("vapi-public-key"));
-        var VAPI_ASSISTANT_ID = vapiCredential(qs.get("vapi_aid")) || vapiCredential(getMeta("vapi-assistant-id"));
+        // Only accept Vapi credentials from server-injected meta tags (not URL params)
+        var VAPI_PUBLIC_KEY = vapiCredential(getMeta("vapi-public-key"));
+        var VAPI_ASSISTANT_ID = vapiCredential(getMeta("vapi-assistant-id"));
         var VAPI_CONFIGURED = !!(VAPI_PUBLIC_KEY && VAPI_ASSISTANT_ID);
 
         async function bootstrapVapiFromServer() {
@@ -480,14 +491,14 @@
 
         function renderPatientCard(p) {
           var tag = tagForPatient(p);
-          var bp = p.blood_pressure || "—";
-          var hb = p.hemoglobin_g_dl != null ? p.hemoglobin_g_dl + " g/dL" : "—";
-          var id = p.patient_id || "";
+          var bp = esc(p.blood_pressure || "—");
+          var hb = p.hemoglobin_g_dl != null ? esc(p.hemoglobin_g_dl + " g/dL") : "—";
+          var id = esc(p.patient_id || "");
           var em = p.emergency || {};
           var isEmergency = em.is_emergency;
-          var loc = p.location ? '<span class="text-[10px] text-slate-400">📍 ' + p.location + '</span>' : '';
+          var loc = p.location ? '<span class="text-[10px] text-slate-400">📍 ' + esc(p.location) + '</span>' : '';
           var emergencyBadge = isEmergency
-            ? '<span class="rounded-md bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700 pulse-emergency">🚨 ' + (em.severity || "").toUpperCase() + '</span>'
+            ? '<span class="rounded-md bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700 pulse-emergency">🚨 ' + esc((em.severity || "").toUpperCase()) + '</span>'
             : '';
           var referralBadge = p.referral_needed
             ? '<span class="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">↗ Referral</span>'
@@ -499,21 +510,21 @@
             (isEmergency ? ' emergency-glow' : '') +
             '" data-patient-id="' + id + '">' +
             '<div class="flex items-start justify-between gap-2">' +
-            '<div><p class="font-bold text-slate-900">' + (p.patient_name || "Unknown") + '</p>' +
-            '<p class="text-xs text-slate-500">' + (p.age_years != null ? p.age_years + ' yrs' : '—') +
-            (p.gender ? ' · ' + p.gender : '') + ' · ' + tag + '</p>' + loc + '</div>' +
+            '<div><p class="font-bold text-slate-900">' + esc(p.patient_name || "Unknown") + '</p>' +
+            '<p class="text-xs text-slate-500">' + (p.age_years != null ? esc(p.age_years) + ' yrs' : '—') +
+            (p.gender ? ' · ' + esc(p.gender) : '') + ' · ' + esc(tag) + '</p>' + loc + '</div>' +
             '<div class="flex flex-col items-end gap-1">' +
             '<div class="flex items-center gap-1">' +
-            '<span class="rounded-md px-2 py-0.5 text-[10px] font-bold ' + tagCls + '">' + tag + '</span>' +
+            '<span class="rounded-md px-2 py-0.5 text-[10px] font-bold ' + tagCls + '">' + esc(tag) + '</span>' +
             riskDot(p.risk_level) + '</div>' + emergencyBadge + referralBadge + '</div></div>' +
             '<div class="mt-3 grid grid-cols-3 gap-2 text-xs">' +
             '<div class="rounded-lg bg-slate-50 px-2 py-2 text-slate-600"><span class="text-slate-400">BP</span><br/><span class="font-semibold text-slate-800">' + bp + '</span></div>' +
             '<div class="rounded-lg bg-slate-50 px-2 py-2 text-slate-600"><span class="text-slate-400">Hb</span><br/><span class="font-semibold text-slate-800">' + hb + '</span></div>' +
-            '<div class="rounded-lg bg-slate-50 px-2 py-2 text-slate-600"><span class="text-slate-400">SpO2</span><br/><span class="font-semibold text-slate-800">' + (p.spo2_percent ? p.spo2_percent + '%' : '—') + '</span></div>' +
+            '<div class="rounded-lg bg-slate-50 px-2 py-2 text-slate-600"><span class="text-slate-400">SpO2</span><br/><span class="font-semibold text-slate-800">' + (p.spo2_percent ? esc(p.spo2_percent) + '%' : '—') + '</span></div>' +
             '</div>' +
             '<div class="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">' +
             '<span class="text-xs text-emerald-600">✓ Portal ready' +
-            (p.visit_count > 1 ? ' <span class="text-[10px] text-blue-600">· ' + p.visit_count + ' visits</span>' : '') +
+            (p.visit_count > 1 ? ' <span class="text-[10px] text-blue-600">· ' + esc(p.visit_count) + ' visits</span>' : '') +
             '</span>' +
             '<span class="rounded-lg bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white">View details</span>' +
             '</div></article>'
@@ -524,13 +535,13 @@
           return (
             '<div class="rounded-xl border-2 border-red-200 bg-red-50 p-3 text-sm emergency-glow">' +
             '<div class="flex items-center justify-between">' +
-            '<p class="font-bold text-red-900">' + (e.patient_name || "Unknown") + '</p>' +
-            '<span class="rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold text-white">' + (e.severity || "").toUpperCase() + '</span>' +
+            '<p class="font-bold text-red-900">' + esc(e.patient_name || "Unknown") + '</p>' +
+            '<span class="rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold text-white">' + esc((e.severity || "").toUpperCase()) + '</span>' +
             '</div>' +
-            '<p class="mt-1 text-xs text-red-800">' + (e.reasons || []).join(", ") + '</p>' +
-            '<p class="mt-1 text-xs font-semibold text-red-700">' + (e.recommended_action || "") + '</p>' +
-            (e.location ? '<p class="mt-1 text-[10px] text-red-600">📍 ' + e.location + '</p>' : '') +
-            (e.phone ? '<p class="mt-1 text-[10px] text-red-600">📱 ' + e.phone + '</p>' : '') +
+            '<p class="mt-1 text-xs text-red-800">' + esc((e.reasons || []).join(", ")) + '</p>' +
+            '<p class="mt-1 text-xs font-semibold text-red-700">' + esc(e.recommended_action || "") + '</p>' +
+            (e.location ? '<p class="mt-1 text-[10px] text-red-600">📍 ' + esc(e.location) + '</p>' : '') +
+            (e.phone ? '<p class="mt-1 text-[10px] text-red-600">📱 ' + esc(e.phone) + '</p>' : '') +
             '</div>'
           );
         }
@@ -585,7 +596,7 @@
           var emBan = $("emergency-banner");
           if (emergencies && emergencies.length > 0) {
             var topE = emergencies[0];
-            $("emergency-text").textContent = (topE.patient_name || "Patient") + " — " + (topE.reasons || []).join(", ");
+            $("emergency-text").textContent = esc(topE.patient_name || "Patient") + " — " + esc((topE.reasons || []).join(", "));
             $("emergency-action").textContent = topE.recommended_action || "";
             emBan.classList.remove("view-hidden");
           } else {
@@ -626,8 +637,8 @@
                 var em = r.emergency || {};
                 var badge = em.is_emergency ? ' <span class="text-[10px] font-bold text-red-600 pulse-emergency">🚨</span>' : '';
                 return '<p class="rounded-xl border border-red-100 bg-white px-3 py-2 text-sm text-red-900">' +
-                  (r.patient_name || "—") + " · " + (r.blood_pressure || "—") + badge +
-                  (r.location ? ' <span class="text-[10px] text-slate-400">📍' + r.location + '</span>' : '') +
+                  esc(r.patient_name || "—") + " · " + esc(r.blood_pressure || "—") + badge +
+                  (r.location ? ' <span class="text-[10px] text-slate-400">📍' + esc(r.location) + '</span>' : '') +
                   '</p>';
               }).join("")
             : '<p class="text-xs text-slate-500">No red-risk patients.</p>';
@@ -1049,7 +1060,7 @@
             } catch (err) {
               var m = err && err.message ? err.message : String(err);
               document.body.insertAdjacentHTML("afterbegin",
-                '<div style="position:fixed;left:0;right:0;top:0;z-index:9999;padding:12px;background:#fee;color:#7f1d1d;font:14px system-ui,sans-serif;border-bottom:2px solid #b91c1c;">SAATHI UI failed: ' + m + '</div>'
+                '<div style="position:fixed;left:0;right:0;top:0;z-index:9999;padding:12px;background:#fee;color:#7f1d1d;font:14px system-ui,sans-serif;border-bottom:2px solid #b91c1c;">SAATHI UI failed: ' + esc(m) + '</div>'
               );
             }
           });
