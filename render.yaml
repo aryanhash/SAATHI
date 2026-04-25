@@ -19,10 +19,7 @@ services:
       # Database API key from Qdrant Cloud → Cluster → API Keys (header api-key).
       - key: QDRANT_API_KEY
         sync: false
-      # If Ollama runs on another machine / tunnel, set full base URL without trailing slash.
-      - key: OLLAMA_BASE_URL
-        sync: false
-      # Recommended on Render: Google AI Studio API key → extraction uses Gemini (not Ollama).
+      # Google AI Studio API key for Gemini extraction.
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
