@@ -7,7 +7,10 @@ import html
 import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +34,14 @@ from db.qdrant_client import (
     store_patient,
 )
 from llm.extractor import GEMINI_MODEL, extract_patient_data, extraction_backend
+from services.gap_prompt import suggest_gap_prompt
+from services.notifications import (
+    build_daily_register_text,
+    notification_status,
+    run_follow_up_reminders_for_today,
+    send_daily_register_whatsapp,
+    start_reminder_background_thread,
+)
 from services.portal_mapper import build_portal_prefill
 from services.risk_engine import calculate_risk, detect_emergency
 
@@ -163,6 +174,131 @@ SAATHI_FIRST_MESSAGE = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Ambient SESSION prompt — language first, then silent scribe / multi-patient
+# ---------------------------------------------------------------------------
+SAATHI_SESSION_PROMPT = """\
+[Identity]
+You are SAATHI in SESSION MODE — a silent medical scribe assisting an ANM during her OPD shift.
+ONE call covers MANY patients. You are NOT a chatbot; you are a quiet assistant that listens,
+records, and only speaks when something critical is missing.
+Before scribe mode begins, you MUST complete language selection once (see below).
+
+[Session language lock — read first]
+After the ANM picks 1–5, you have a **locked session language** (Hindi, English, Kannada, Tamil, or Telugu).
+**Every** assistant utterance for the rest of the call — confirmations, Case 1 questions, emergency line, session end —
+must be **only** in that locked language.
+If the lock is **English**, you must use **English only** (no Hindi words, no mixed Hinglish, no Hindi stock phrases).
+If the lock is **Hindi**, use Hindi. Same for Kannada / Tamil / Telugu.
+The ANM may still dictate patient data in Hindi or mixed language; that does **not** change your output language.
+
+[Language selection — always first]
+The first message the user hears is already the welcome (press 1 for Hindi, 2 for English, and so on).
+Wait for their choice:
+  • 1 or Hindi / हिंदी → lock Hindi for the entire rest of the call.
+  • 2 or English → lock English for the entire rest of the call.
+  • 3 or Kannada → lock Kannada for the rest of the call.
+  • 4 or Tamil → lock Tamil for the rest of the call.
+  • 5 or Telugu → lock Telugu for the rest of the call.
+If unclear, ask once which number they want — in neutral short English is OK for that one clarification only.
+After they choose, say exactly **one** short line **in the locked language only**, then go silent.
+Examples of tone (produce your line in the **locked** language, not a mix):
+  • If lock is Hindi: one line inviting first patient with ID, name, details.
+  • If lock is English: e.g. "Understood. First patient: ID, then name, then details."
+Do NOT ask for language again after this step.
+
+[Golden Rule]
+LISTEN FIRST. STRUCTURE LATER. PROMPT ONLY WHEN NEEDED.
+Never interrupt while the ANM is speaking. Do not acknowledge, affirm, or repeat back.
+No "okay", "got it", "mhm", "thank you". Stay silent.
+
+[Silence and pauses — critical]
+Pauses while the ANM thinks or dictates are normal. Do **not** speak only because the line is quiet.
+Never say the word "silence", never narrate quiet, never use filler because it is silent.
+If nothing in Case 1–3 applies, output **no speech**.
+
+[How the ANM uses you]
+For each patient she will speak in this natural order:
+  1. Patient ID  (e.g. "ID 1042"  or  "ID one zero four two"  or  "naya patient")
+  2. Patient name
+  3. Age, gender (if relevant)
+  4. Vitals (BP, Hb, weight, temperature, SpO2, sugar)
+  5. Symptoms / complaints
+  6. Diagnosis / treatment / medicines / vaccines
+  7. Referral or follow-up (if any)
+
+When she finishes a patient she will say one of:
+  "next" / "agla" / "aage" / "agla patient" / "next patient" / "dusra patient"
+
+That is your boundary signal. The previous patient's data is automatically
+saved by the system. You do NOT need to confirm or summarize.
+
+[When to speak — ONLY these three cases]
+
+Case 1 — Critical missing field (not because of pauses):
+  From what the ANM has **already said** for the CURRENT patient, if a critical field is clearly still missing
+  for that patient type, you may ask **one** short question (max 8 words) **in the locked session language only**.
+  If she is only pausing or you are unsure anything is missing, say **nothing**.
+
+  Patient type → critical fields:
+    • Pregnant woman (ANC) → pregnancy weeks, BP, Hb
+    • Child / immunization → age in months, vaccines given, weight
+    • NCD / adult OPD     → BP, primary complaint
+    • General             → age, primary complaint
+
+  **Do not copy Hindi** if the session lock is English (or other non-Hindi). Shape your question like these **English**
+  patterns, then **translate** into the locked language when the lock is not English:
+    • "Please confirm blood pressure and hemoglobin."
+    • "Please confirm the child's age and weight."
+    • "What is the main complaint?"
+  (When lock is Hindi, natural Hindi equivalents are fine — still one short question.)
+
+Case 2 — Emergency keyword detected:
+  If you hear: severe bleeding, chest pain, convulsion, unconscious,
+  severe breathlessness, blurred vision (in pregnancy), severe headache,
+  swelling face, reduced fetal movement, leaking fluid, BP above 180,
+  Hb below 5 — say **exactly once**, **in the locked session language only**.
+  English lock example (translate for other locks): "This may be an emergency. Call one zero eight?"
+  Then go silent again.
+
+Case 3 — End of session:
+  When the ANM says "session end" / "session khatam" / "bas done" / "end session":
+    Say in the **locked** language that the session is complete. Optional patient count only if you are sure.
+  Then stop completely.
+
+[What you must NEVER do]
+  - Never ask for language again after [Language selection] is done.
+  - Never repeat back what she said.
+  - Never summarize or recap mid-session.
+  - Never ask follow-up questions just to be thorough — only critical fields.
+  - Never speak while she is still speaking. Never speak only because she paused.
+  - Never say "next patient" yourself — that's her trigger word, not yours.
+  - Never switch your **spoken** language away from the lock (no mid-call Hindi if English was locked).
+
+[Number handling]
+When the ANM says numbers, accept them as-is. Do not read long confirmations back.
+Only ask again if a number was clearly garbled or impossible.
+
+[Style]
+Warm but minimal. One short sentence per intervention. **Locked session language only.**
+No medical advice, no opinions, no chitchat.
+
+[Closing]
+Stay on the call indefinitely. The ANM ends the session by saying
+"session end" or by tapping End Session in the app. Do not end the call
+yourself."""
+
+SAATHI_SESSION_FIRST_MESSAGE = (
+    "Welcome to our service. "
+    "हिंदी के लिए 1 दबाएं। "
+    "For English, press 2. "
+    "ಕನ್ನಡಕ್ಕಾಗಿ 3 ಒತ್ತಿರಿ. "
+    "தமிழுக்கு 4 அழுத்தவும். "
+    "తెలుగుకు 5 నొక్కండి. "
+    "Please select your preferred language."
+)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logging.basicConfig(
@@ -190,6 +326,10 @@ async def lifespan(app: FastAPI):
         logger.info("saathi.boot qdrant_ok collection_ready")
     except Exception as e:
         logger.warning("saathi.boot qdrant_skip reason=%s", e)
+    try:
+        start_reminder_background_thread()
+    except Exception as e:
+        logger.warning("saathi.boot reminder_thread_skip reason=%s", e)
     yield
 
 
@@ -261,6 +401,14 @@ class SimulateCallBody(BaseModel):
     transcript: str = Field(..., min_length=1)
 
 
+class SessionGapBody(BaseModel):
+    transcript: str = Field(..., min_length=1)
+    session_language: str | None = Field(
+        default=None,
+        description="hi | en | kn | ta | te — should match ANM language choice (default hi)",
+    )
+
+
 def _extract_llm(transcript: str) -> dict[str, Any]:
     logger.info("pipeline.extract start chars=%s backend=%s", len(transcript), extraction_backend())
     try:
@@ -291,6 +439,7 @@ def _run_voice_pipeline(
     log_prefix: str,
     vapi_call_id: str | None = None,
 ) -> dict[str, Any]:
+    _t0 = time.perf_counter()
     logger.info("%s pipeline.begin transcript_chars=%s", log_prefix, len(transcript))
     extracted = _extract_llm(transcript)
     logger.info(
@@ -318,7 +467,8 @@ def _run_voice_pipeline(
         logger.exception("%s pipeline.store FAILED", log_prefix)
         raise HTTPException(status_code=503, detail=f"Qdrant store failed: {e}") from e
     data["patient_id"] = pid
-    logger.info("%s pipeline.complete patient_id=%s", log_prefix, pid)
+    _elapsed_ms = int((time.perf_counter() - _t0) * 1000)
+    logger.info("%s pipeline.complete patient_id=%s elapsed_ms=%s", log_prefix, pid, _elapsed_ms)
     return {"status": "processed", "patient": data}
 
 
@@ -360,6 +510,67 @@ def get_system_prompt() -> dict[str, Any]:
         ],
         "usage": "These are automatically applied as Vapi assistant overrides when starting a call.",
     }
+
+
+@app.get("/api/session-prompt")
+def get_session_prompt() -> dict[str, Any]:
+    """Return the AMBIENT SESSION prompt — silent scribe, multi-patient single call."""
+    return {
+        "prompt": SAATHI_SESSION_PROMPT,
+        "firstMessage": SAATHI_SESSION_FIRST_MESSAGE,
+        "boundary_words": [
+            "next", "next patient",
+            "aage", "agla", "agla patient", "dusra patient",
+        ],
+        "end_session_words": [
+            "session end", "session khatam", "bas done", "end session",
+        ],
+        "mode": "ambient_session",
+    }
+
+
+@app.post("/api/session-gap-prompt")
+def session_gap_prompt(body: SessionGapBody) -> dict[str, Any]:
+    """
+    Optional host hook: transcript blob → one line to speak for missing critical fields.
+    (Browser may call this after a pause; keep Vapi assistant prompt aligned so it does not narrate silence.)
+    """
+    say = suggest_gap_prompt(body.transcript.strip(), body.session_language)
+    logger.info(
+        "route.session_gap_prompt chars=%s lang=%s say=%s",
+        len(body.transcript.strip()),
+        body.session_language or "(default)",
+        repr(say) if say else "null",
+    )
+    return {"say": say}
+
+
+@app.get("/api/notifications/status")
+def notifications_status_route() -> dict[str, Any]:
+    return notification_status()
+
+
+@app.post("/api/notifications/follow-up-reminders/run")
+def notifications_run_follow_ups() -> dict[str, Any]:
+    """Manually trigger visit-day SMS scan (same logic as hourly background job)."""
+    return run_follow_up_reminders_for_today()
+
+
+@app.get("/api/notifications/daily-register/preview")
+def notifications_register_preview() -> dict[str, Any]:
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+    return {
+        "date": today.isoformat(),
+        "preview": build_daily_register_text(get_all_patients(), today),
+    }
+
+
+@app.post("/api/notifications/daily-register/whatsapp")
+def notifications_register_whatsapp() -> dict[str, Any]:
+    try:
+        return send_daily_register_whatsapp()
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.get("/patients")
@@ -488,6 +699,270 @@ def portal_prefill(patient_id: str, _key: str | None = Depends(verify_api_key)) 
         "uwin": portals["uwin"],
         "ncd": portals["ncd"],
     }
+
+
+# ---------------------------------------------------------------------------
+# Patient-facing OPD prescription slip (printable HTML)
+# ---------------------------------------------------------------------------
+
+def _patient_advice(risk_level: str | None) -> str:
+    return {
+        "red": "Please visit District Hospital urgently — within 24 hours.",
+        "amber": "Please follow up at PHC within 2-3 days.",
+        "green": "Routine follow-up as scheduled.",
+    }.get(risk_level or "green", "Routine follow-up as scheduled.")
+
+
+def _esc(v: Any) -> str:
+    """HTML-escape a possibly-None value, preserving '—' for empties."""
+    if v is None or v == "":
+        return "—"
+    if isinstance(v, list):
+        if not v:
+            return "—"
+        return html.escape(", ".join(str(x) for x in v))
+    return html.escape(str(v))
+
+
+def _render_prescription_html(p: dict[str, Any]) -> str:
+    """Build a print-optimized OPD slip for the ward boy / patient."""
+    name = _esc(p.get("patient_name"))
+    pid = _esc(p.get("patient_id"))
+    age = p.get("age_years")
+    gender = p.get("gender")
+    age_sex = " / ".join(filter(None, [str(age) if age is not None else None, gender])) or "—"
+    phone = _esc(p.get("phone"))
+    location = _esc(p.get("location"))
+    visit_type = _esc(p.get("visit_type"))
+    date_now = datetime.now(timezone.utc).strftime("%d-%b-%Y  %H:%M")
+    date_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Vitals
+    bp = _esc(p.get("blood_pressure"))
+    hb = _esc(p.get("hemoglobin_g_dl"))
+    weight = _esc(p.get("weight_kg"))
+    temp = _esc(p.get("temperature_f"))
+    spo2 = _esc(p.get("spo2_percent"))
+    sugar = _esc(p.get("random_blood_sugar_mg_dl"))
+    pulse = _esc(p.get("pulse_rate"))
+
+    # Clinical
+    symptoms = _esc(p.get("symptoms"))
+    diagnosis = _esc(p.get("diagnosis"))
+    medicines = p.get("medicines_given") or []
+    vaccines = p.get("vaccines_given") or []
+    counseling = _esc(p.get("counseling_done"))
+
+    # Pregnancy details (ANC)
+    preg_months = p.get("pregnancy_months")
+    preg_line = (
+        f"<tr><td>Pregnancy</td><td>{_esc(preg_months)} months</td></tr>"
+        if preg_months else ""
+    )
+
+    # Risk and advice
+    risk = (p.get("risk_level") or "green").lower()
+    risk_color = {"red": "#b91c1c", "amber": "#b45309", "green": "#047857"}[
+        risk if risk in ("red", "amber", "green") else "green"
+    ]
+    advice = _patient_advice(risk)
+
+    # Referral
+    ref_needed = bool(p.get("referral_needed"))
+    ref_facility = _esc(p.get("referral_facility"))
+    ref_reason = _esc(p.get("referral_reason"))
+    follow_up = _esc(p.get("follow_up_date"))
+
+    # Medicines list HTML
+    if medicines:
+        meds_html = "<ol style='margin:6px 0 0 18px;padding:0'>" + "".join(
+            f"<li style='margin:2px 0'>{html.escape(str(m))}</li>" for m in medicines
+        ) + "</ol>"
+    else:
+        meds_html = "<p style='margin:4px 0;color:#64748b'>—</p>"
+
+    # Vaccines list HTML
+    vacc_block = ""
+    if vaccines:
+        vacc_block = (
+            "<div class='block'><div class='label'>Vaccines administered</div>"
+            "<ul style='margin:6px 0 0 18px'>"
+            + "".join(f"<li>{html.escape(str(v))}</li>" for v in vaccines)
+            + "</ul></div>"
+        )
+
+    # Referral block
+    ref_block = ""
+    if ref_needed:
+        ref_block = (
+            "<div class='block referral'><div class='label'>Referral</div>"
+            f"<p><strong>To:</strong> {ref_facility}</p>"
+            f"<p><strong>Reason:</strong> {ref_reason}</p></div>"
+        )
+
+    return f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<title>OPD Slip — {name}</title>
+<style>
+  * {{ box-sizing: border-box; }}
+  body {{
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #f1f5f9; margin: 0; padding: 20px; color: #0f172a;
+  }}
+  .slip {{
+    max-width: 720px; margin: 0 auto; background: #fff;
+    border: 2px solid #1d4ed8; border-radius: 12px;
+    padding: 24px 28px; box-shadow: 0 6px 24px rgba(15,23,42,.08);
+  }}
+  .header {{
+    display:flex; justify-content:space-between; align-items:center;
+    border-bottom: 2px solid #1d4ed8; padding-bottom: 10px; margin-bottom: 14px;
+  }}
+  .header h1 {{ font-size: 20px; margin: 0; color: #1d4ed8; letter-spacing: 1px; }}
+  .header .sub {{ font-size: 11px; color: #64748b; }}
+  .meta {{ display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; font-size: 13px; }}
+  .meta .k {{ color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }}
+  .meta .v {{ font-weight: 600; }}
+  .block {{ margin-top: 16px; }}
+  .label {{
+    font-size: 10px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; color: #64748b; margin-bottom: 6px;
+  }}
+  table.vit {{ width:100%; border-collapse: collapse; font-size: 13px; }}
+  table.vit td {{ padding: 4px 8px; border-bottom: 1px dashed #e2e8f0; }}
+  table.vit td:first-child {{ color:#64748b; width: 40%; }}
+  table.vit td:last-child  {{ font-weight: 600; }}
+  .risk-pill {{
+    display: inline-block; padding: 4px 12px; border-radius: 999px;
+    font-size: 11px; font-weight: 700; letter-spacing: .5px;
+    color:#fff; background: {risk_color};
+  }}
+  .advice {{
+    margin-top: 14px; padding: 12px 14px; border-radius: 10px;
+    background: #fef3c7; border-left: 4px solid #d97706; font-size: 13px;
+    color: #78350f;
+  }}
+  .referral {{
+    background: #fee2e2; border-left: 4px solid #b91c1c; padding: 10px 14px;
+    border-radius: 10px;
+  }}
+  .footer {{
+    margin-top: 24px; display: flex; justify-content: space-between; align-items: end;
+    padding-top: 14px; border-top: 1px dashed #cbd5e1; font-size: 12px;
+  }}
+  .sig {{ width: 200px; border-top: 1px solid #94a3b8; padding-top: 4px; text-align: center; color:#64748b; }}
+  .actions {{ max-width: 720px; margin: 14px auto 0; display: flex; gap: 8px; justify-content: flex-end; }}
+  .btn {{
+    background: #1d4ed8; color: #fff; border: 0; border-radius: 8px;
+    padding: 10px 18px; font-weight: 600; cursor: pointer; font-size: 13px;
+  }}
+  .btn.secondary {{ background: #e2e8f0; color: #0f172a; }}
+  @media print {{
+    body {{ background: #fff; padding: 0; }}
+    .slip {{ border: none; box-shadow: none; max-width: 100%; }}
+    .actions {{ display: none; }}
+  }}
+</style></head>
+<body>
+  <div class="slip">
+    <div class="header">
+      <div>
+        <h1>SAATHI · OPD SLIP</h1>
+        <div class="sub">Sub-Centre / UPHC · Auto-generated from voice consultation</div>
+      </div>
+      <div style="text-align:right">
+        <div class="sub">Date</div>
+        <div style="font-weight:600">{date_now}</div>
+      </div>
+    </div>
+
+    <div class="meta">
+      <div><div class="k">Patient ID</div><div class="v">{pid}</div></div>
+      <div><div class="k">Visit Type</div><div class="v">{visit_type}</div></div>
+      <div><div class="k">Name</div><div class="v">{name}</div></div>
+      <div><div class="k">Age / Sex</div><div class="v">{age_sex}</div></div>
+      <div><div class="k">Phone</div><div class="v">{phone}</div></div>
+      <div><div class="k">Address</div><div class="v">{location}</div></div>
+    </div>
+
+    <div class="block">
+      <div class="label">Vitals</div>
+      <table class="vit">
+        <tr><td>Blood Pressure</td><td>{bp}</td></tr>
+        <tr><td>Hemoglobin (g/dL)</td><td>{hb}</td></tr>
+        <tr><td>Weight (kg)</td><td>{weight}</td></tr>
+        <tr><td>Pulse</td><td>{pulse}</td></tr>
+        <tr><td>Temperature (°F)</td><td>{temp}</td></tr>
+        <tr><td>SpO₂ (%)</td><td>{spo2}</td></tr>
+        <tr><td>Random Blood Sugar (mg/dL)</td><td>{sugar}</td></tr>
+        {preg_line}
+      </table>
+    </div>
+
+    <div class="block">
+      <div class="label">Complaints</div>
+      <p style="margin:4px 0">{symptoms}</p>
+    </div>
+
+    <div class="block">
+      <div class="label">Diagnosis</div>
+      <p style="margin:4px 0">{diagnosis}</p>
+    </div>
+
+    <div class="block">
+      <div class="label">Medicines Prescribed</div>
+      {meds_html}
+    </div>
+
+    {vacc_block}
+
+    <div class="block">
+      <div class="label">Counseling</div>
+      <p style="margin:4px 0;color:#0f172a">{counseling}</p>
+    </div>
+
+    {ref_block}
+
+    <div class="advice">
+      <strong>Advice:</strong> {html.escape(advice)}
+      <br><strong>Follow-up:</strong> {follow_up}
+    </div>
+
+    <div class="footer">
+      <div>
+        <div><span class="risk-pill">{risk.upper()}</span></div>
+        <div style="margin-top:6px;color:#64748b;font-size:11px">
+          Generated: {date_iso} · For patient reference. Not a medical certificate.
+        </div>
+      </div>
+      <div class="sig">ANM Signature</div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn secondary" onclick="window.close()">Close</button>
+    <button class="btn" onclick="window.print()">Print OPD slip</button>
+  </div>
+
+  <script>
+    // Auto-trigger print dialog when ?autoprint=1
+    if (new URLSearchParams(location.search).get('autoprint') === '1') {{
+      setTimeout(function () {{ window.print(); }}, 300);
+    }}
+  </script>
+</body></html>
+"""
+
+
+@app.get("/patient/{patient_id}/prescription", response_class=HTMLResponse)
+def patient_prescription(patient_id: str) -> HTMLResponse:
+    """Print-optimized OPD slip for the patient. Ward boy clicks → prints → hands to patient."""
+    logger.info("route.prescription lookup patient_id=%s", patient_id)
+    row = get_patient_by_id(patient_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    return HTMLResponse(_render_prescription_html(row))
 
 
 @app.post("/seed-demo")

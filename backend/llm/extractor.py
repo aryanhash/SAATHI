@@ -29,13 +29,14 @@ def extraction_backend() -> str:
 
 
 def _active_llm_backend() -> str:
+    """
+    Extraction backend. Default is **Gemini** (production).
+    Set ``SAATHI_LLM=ollama`` explicitly for local development without a Google API key.
+    """
     force = (os.environ.get("SAATHI_LLM") or "").strip().lower()
     if force == "ollama":
         return "ollama"
-    if force == "gemini":
-        return "gemini"
-    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    return "gemini" if key else "ollama"
+    return "gemini"
 
 
 def _gemini_api_key() -> str | None:
@@ -174,14 +175,17 @@ def _extract_with_gemini(transcript: str, api_key: str) -> dict[str, Any]:
 
 def extract_patient_data(transcript: str) -> dict[str, Any]:
     """
-    Structured extraction: Gemini when API key set, otherwise Ollama.
-    Now extracts 40+ fields for realistic ANMOL/U-WIN/NCD portal mapping.
+    Structured extraction: **Gemini by default** (set GEMINI_API_KEY or GOOGLE_API_KEY).
+    Use ``SAATHI_LLM=ollama`` only for local runs without a Google key.
     """
     backend = _active_llm_backend()
     if backend == "gemini":
         key = _gemini_api_key()
         if not key:
-            raise ValueError("SAATHI_LLM=gemini but GEMINI_API_KEY / GOOGLE_API_KEY is missing")
+            raise ValueError(
+                "Extraction uses Gemini by default: set GEMINI_API_KEY or GOOGLE_API_KEY in .env. "
+                "For local development without Google AI, set SAATHI_LLM=ollama and run Ollama."
+            )
         logger.info("llm.extract backend=gemini model=%s", GEMINI_MODEL)
         return _extract_with_gemini(transcript, key)
     logger.info("llm.extract backend=ollama model=%s", OLLAMA_MODEL)
