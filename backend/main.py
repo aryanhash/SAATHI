@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from db.qdrant_client import (
     create_collection,
+    delete_seeded_demo_points,
     embedding_mode,
     get_all_patients,
     get_emergencies as db_get_emergencies,
@@ -767,11 +768,28 @@ def analytics(_key: str | None = Depends(verify_api_key)) -> dict[str, Any]:
     }
 
 
+@app.post("/api/clear-seeded-demo")
+def clear_seeded_demo(_key: str | None = Depends(verify_api_key)) -> dict[str, Any]:
+    """
+    Delete patients created via ``POST /seed-demo`` (flag ``seeded_demo``).
+    Called by the UI on each full page load unless ``SAATHI_KEEP_DEMO_ON_RELOAD`` is set.
+    """
+    if (os.environ.get("SAATHI_KEEP_DEMO_ON_RELOAD") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return {"ok": True, "removed": 0, "skipped": True, "reason": "SAATHI_KEEP_DEMO_ON_RELOAD"}
+    n = delete_seeded_demo_points()
+    return {"ok": True, "removed": n}
+
+
 @app.get("/search")
 def search_patients(q: str = "", limit: int = 10, _key: str | None = Depends(verify_api_key)) -> dict[str, Any]:
     """
-    Semantic search: find patients whose records are most similar to the query.
-    With Gemini embeddings → true semantic similarity (e.g. "headache pregnant" finds ANC patients with headache).
+    Hybrid search: vector similarity + lexical overlap on the same text used to embed patients.
+    With Gemini embeddings, results align better with short clinical phrases (e.g. \"swelling feet\").
     """
     if not q.strip():
         return {"query": q, "results": [], "embedding_mode": embedding_mode()}
@@ -1194,6 +1212,7 @@ def seed_demo(_key: str | None = Depends(verify_api_key)) -> dict[str, Any]:
     ids: list[str] = []
     try:
         for raw in mocks:
+            raw["seeded_demo"] = True
             row = calculate_risk(raw)
             ids.append(store_patient(row))
     except Exception as e:

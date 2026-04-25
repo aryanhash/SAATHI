@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -95,6 +96,8 @@ def _patient_text(data: dict[str, Any]) -> str:
         parts.append("vaccines: " + ", ".join(data["vaccines_given"]))
     if data.get("referral_facility"):
         parts.append(f"referred to {data['referral_facility']}")
+    if data.get("referral_reason"):
+        parts.append(f"referral reason {data['referral_reason']}")
     if data.get("location"):
         parts.append(f"location {data['location']}")
     if data.get("notes"):
@@ -197,6 +200,7 @@ def _create_payload_indexes(client: QdrantClient) -> None:
         ("patient_name", models.PayloadSchemaType.KEYWORD),
         ("visit_type", models.PayloadSchemaType.KEYWORD),
         ("location", models.PayloadSchemaType.KEYWORD),
+        ("seeded_demo", models.PayloadSchemaType.BOOL),
     ]
     for field, schema in indexes:
         try:
@@ -281,6 +285,8 @@ def store_patient(data: dict[str, Any]) -> str:
         history.append(snapshot)
 
         merged = dict(old_payload)
+        if old_payload.get("seeded_demo"):
+            merged["seeded_demo"] = True
         # Preserve who originally registered the patient (first writer wins).
         # Later visits should not overwrite registration ownership.
         _registration_keys = {
@@ -442,30 +448,123 @@ def get_patients_by_location(location: str) -> list[dict[str, Any]]:
 # Semantic search
 # ---------------------------------------------------------------------------
 
-def search_similar(query: str, limit: int = 10) -> list[dict[str, Any]]:
+_TOKEN_RE = re.compile(r"[\w\u0900-\u0fff']+", re.UNICODE)
+
+
+def _search_query_for_embedding(query: str) -> str:
     """
-    Semantic vector search: find patients whose records are most similar to the query.
-    With Gemini embeddings this is true semantic similarity.
-    With fallback embeddings, results are hash-based (less meaningful but still functional).
+    Enrich the raw user phrase so the embedding model aligns with how patient
+    cards are vectorized (symptoms, vitals, visit context).
+    """
+    q = (query or "").strip()
+    if not q:
+        return "patient health record"
+    return (
+        "Match ANM/OPD health records: patient name, vitals, symptoms, diagnosis, "
+        f"emergency signs, pregnancy, immunization, location. Search query: {q}"
+    )
+
+
+def _lexical_relevance(query: str, row: dict[str, Any]) -> float:
+    """Token overlap between query and the same text shape used for patient vectors."""
+    q = (query or "").strip().lower()
+    if not q:
+        return 0.0
+    q_tokens = set(t for t in _TOKEN_RE.findall(q) if len(t) > 1)
+    if not q_tokens:
+        return 0.0
+    doc = _patient_text(row).lower()
+    doc_tokens = set(t for t in _TOKEN_RE.findall(doc) if len(t) > 1)
+    if not doc_tokens:
+        return 0.0
+    inter = q_tokens & doc_tokens
+    return len(inter) / max(len(q_tokens), 1)
+
+
+def _vector_score_norm(raw: float) -> float:
+    """Qdrant cosine scores are typically in [0,1]; keep bounded."""
+    try:
+        x = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+    if x < 0:
+        return 0.0
+    if x > 1.0:
+        return 1.0
+    return x
+
+
+def _combined_rank_score(vscore: float, lscore: float) -> float:
+    return 0.58 * vscore + 0.42 * lscore
+
+
+def delete_seeded_demo_points() -> int:
+    """
+    Remove all points with ``seeded_demo`` flag (from Load demo data).
+    Returns number of points deleted (best-effort; 0 on empty / error).
     """
     client = _client()
-    vector = embed(query)
+    flt = models.Filter(
+        must=[models.FieldCondition(key="seeded_demo", match=models.MatchValue(value=True))],
+    )
+    try:
+        before, _ = client.scroll(collection_name=COLLECTION, scroll_filter=flt, limit=5000, with_payload=False)
+        n = len(before)
+        if n == 0:
+            return 0
+        client.delete(collection_name=COLLECTION, points_selector=flt, wait=True)
+        logger.info("qdrant.delete_seeded_demo removed=%s", n)
+        return n
+    except Exception as e:
+        logger.warning("qdrant.delete_seeded_demo failed err=%s", e)
+        return 0
+
+
+def search_similar(query: str, limit: int = 10) -> list[dict[str, Any]]:
+    """
+    Hybrid semantic search: dense vectors (Gemini) + lexical rerank on patient text.
+    Pulls a wider HNSW candidate set, then reorders for phrase/token alignment.
+    """
+    client = _client()
+    qraw = (query or "").strip()
+    embed_text = _search_query_for_embedding(qraw) if qraw else ""
+    vector = embed(embed_text or "patient")
+    fetch_max = min(100, max(limit * 4, max(16, limit)))
     try:
         resp = client.query_points(
             collection_name=COLLECTION,
             query=vector,
-            limit=limit,
+            limit=fetch_max,
             with_payload=True,
+            search_params=models.SearchParams(hnsw_ef=max(64, min(200, limit * 12))),
         )
         hits = resp.points if hasattr(resp, "points") else resp
     except Exception as e:
         logger.warning("qdrant.search failed err=%s", e)
         return []
 
-    results: list[dict[str, Any]] = []
+    ranked: list[tuple[float, float, float, dict[str, Any]]] = []
     for hit in hits:
-        if hit.payload:
-            row = dict(hit.payload)
-            row["_similarity_score"] = round(hit.score, 4)
-            results.append(row)
-    return results
+        if not hit.payload:
+            continue
+        row = dict(hit.payload)
+        vsc = _vector_score_norm(getattr(hit, "score", 0) or 0)
+        lsc = _lexical_relevance(qraw, row) if qraw else 0.0
+        comb = _combined_rank_score(vsc, lsc)
+        ranked.append((comb, vsc, lsc, row))
+    ranked.sort(key=lambda t: t[0], reverse=True)
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for comb, vsc, lsc, row in ranked:
+        if len(out) >= limit:
+            break
+        pid = str(row.get("patient_id") or "")
+        if pid and pid in seen:
+            continue
+        if pid:
+            seen.add(pid)
+        row["_similarity_score"] = round(comb, 4)
+        row["_vector_score"] = round(vsc, 4)
+        row["_lexical_score"] = round(lsc, 4)
+        out.append(row)
+    return out

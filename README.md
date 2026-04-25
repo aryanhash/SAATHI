@@ -68,7 +68,8 @@ Browser (Vapi SDK)  →  FastAPI  →  Gemini (extraction + embeddings)
 | `GET` | `/risk-flags` | Red-risk patients |
 | `GET` | `/emergencies` | Emergency cases |
 | `GET` | `/analytics` | Dashboard analytics |
-| `GET` | `/search` | Semantic search (`q`, `limit`) |
+| `GET` | `/search` | Hybrid semantic + lexical search (`q`, `limit`) |
+| `POST` | `/api/clear-seeded-demo` | Remove patients from **Load demo data** (also runs on `/ui/` load unless `SAATHI_KEEP_DEMO_ON_RELOAD`) |
 | `GET` | `/patients/by-type/{visit_type}` | Filter by visit type |
 | `GET` | `/portal-prefill/{id}` | ANMOL, U-WIN, NCD JSON for a patient |
 | `GET` | `/patient/{id}/prescription` | **Printable OPD slip** (HTML; `?autoprint=1`) |
