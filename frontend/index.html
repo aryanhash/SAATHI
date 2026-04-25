@@ -1110,7 +1110,13 @@
           try {
             var r = await api("/api/notifications/follow-up-reminders/run", { method: "POST" });
             if (r.reason === "twilio_not_configured") {
-              showToast("Twilio not configured — add TWILIO_* to .env");
+              showToast("Twilio not configured — add TWILIO_* or SAATHI_DEMO_PHONE for demo logs");
+            } else if (r.reason === "demo_phone_required") {
+              showToast(r.detail || "Set SAATHI_DEMO_PHONE in .env for demo");
+            } else if (r.demo) {
+              showToast(
+                "Demo: logged " + (r.simulated || 0) + " SMS (not sent) · skipped " + (r.skipped || 0) + " — check server log",
+              );
             } else {
               showToast("Visit-day SMS · sent: " + (r.sent || 0) + ", skipped: " + (r.skipped || 0));
             }
@@ -1123,7 +1129,12 @@
         on("btn-send-register-wa", "click", async function () {
           try {
             var r = await api("/api/notifications/daily-register/whatsapp", { method: "POST" });
-            showToast("WhatsApp sent · " + (r.sid || "ok"));
+            if (r.demo && r.whatsapp_open_url) {
+              showToast("Demo: opening WhatsApp draft (your number) — tap Send in the app");
+              window.open(r.whatsapp_open_url, "_blank", "noopener,noreferrer");
+            } else {
+              showToast("WhatsApp sent · " + (r.sid || "ok"));
+            }
           } catch (e) {
             showToast(String(e.message || e));
           }

@@ -9,6 +9,7 @@ import threading
 import time
 from datetime import date, datetime
 from typing import Any
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import requests
@@ -28,6 +29,38 @@ def _twilio_configured() -> bool:
     )
 
 
+def _twilio_sms_send_ready() -> bool:
+    return bool(
+        _twilio_configured()
+        and (os.environ.get("TWILIO_SMS_FROM") or "").strip()
+    )
+
+
+def _twilio_whatsapp_send_ready() -> bool:
+    return bool(
+        _twilio_configured()
+        and (os.environ.get("TWILIO_WHATSAPP_FROM") or "").strip()
+    )
+
+
+def _env_truthy(name: str) -> bool:
+    v = (os.environ.get(name) or "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def notifications_demo_mode() -> bool:
+    """
+    - Set ``SAATHI_NOTIFICATIONS_DEMO=1`` to force demo (log + wa.me) even with Twilio.
+    - Or leave Twilio unset and set ``SAATHI_DEMO_PHONE`` — no carrier; SMS is logged only;
+      daily register returns a click-to-chat URL for that number.
+    """
+    if _env_truthy("SAATHI_NOTIFICATIONS_DEMO"):
+        return True
+    if not _twilio_configured():
+        return bool((os.environ.get("SAATHI_DEMO_PHONE") or "").strip())
+    return False
+
+
 def _normalize_phone_e164(raw: str | None) -> str | None:
     if not raw:
         return None
@@ -41,6 +74,35 @@ def _normalize_phone_e164(raw: str | None) -> str | None:
     if raw.strip().startswith("+") and len(digits) >= 10:
         return "+" + digits
     return None
+
+
+def _demo_e164_or_none() -> str | None:
+    return _normalize_phone_e164(os.environ.get("SAATHI_DEMO_PHONE"))
+
+
+def _wa_me_url(phone_e164: str, text: str) -> str:
+    """Click-to-chat link (opens WhatsApp on a device with the draft message). No Twilio."""
+    digits = re.sub(r"\D", "", phone_e164)
+    if not digits:
+        return ""
+    t = text[:3000]
+    return f"https://wa.me/{digits}?text={quote(t, safe='')}"
+
+
+def _log_demo_sms(
+    intended_patient_to: str,
+    body: str,
+    *,
+    patient_id: str,
+    demo_recipient: str,
+) -> None:
+    logger.info(
+        "notifications.DEMO_SMS (not sent — no Twilio) digest_recipient=%s patient_id=%s would_send_to=%s\n%s",
+        demo_recipient,
+        patient_id,
+        intended_patient_to,
+        body,
+    )
 
 
 def send_sms(to_e164: str, body: str) -> dict[str, Any]:
@@ -142,6 +204,7 @@ def run_follow_up_reminders_for_today() -> dict[str, Any]:
     """
     Send SMS to patients whose follow_up_date is today (IST) and phone is set.
     Sets payload follow_up_reminder_sent_for to the follow_up_date string after success.
+    In demo mode (no Twilio, SAATHI_DEMO_PHONE set) messages are logged only, not sent.
     """
     today = datetime.now(IST).date()
     today_s = today.isoformat()
@@ -150,7 +213,51 @@ def run_follow_up_reminders_for_today() -> dict[str, Any]:
     skipped = 0
     errors: list[str] = []
 
-    if not _twilio_configured():
+    if notifications_demo_mode():
+        demo_to = _demo_e164_or_none()
+        if not demo_to:
+            logger.info("notifications.follow_up skip demo mode but SAATHI_DEMO_PHONE missing")
+            return {
+                "ok": False,
+                "reason": "demo_phone_required",
+                "today": today_s,
+                "detail": "Set SAATHI_DEMO_PHONE=+91XXXXXXXXXX in .env for demo, or add Twilio for real SMS.",
+            }
+        for p in patients:
+            pid = p.get("patient_id")
+            if not pid:
+                continue
+            fu = _parse_iso_date(p.get("follow_up_date"))
+            if fu is None or fu != today:
+                continue
+            fu_key = p.get("follow_up_date")
+            if str(p.get("follow_up_reminder_sent_for") or "") == str(fu_key):
+                skipped += 1
+                continue
+            phone = _normalize_phone_e164(p.get("phone"))
+            if not phone:
+                skipped += 1
+                continue
+            name = (p.get("patient_name") or "Patient").strip()[:40]
+            msg = (
+                f"Namaskar {name}, aaj ({today.strftime('%d-%b-%Y')}) aapki follow-up visit PHC par scheduled hai. "
+                f"Kripya samay par aayein. — SAATHI"
+            )
+            _log_demo_sms(phone, msg, patient_id=str(pid), demo_recipient=demo_to)
+            sent += 1
+            logger.info("notifications.follow_up demo_logged patient_id=%s", pid)
+        return {
+            "ok": True,
+            "demo": True,
+            "demo_recipient": demo_to,
+            "today": today_s,
+            "simulated": sent,
+            "skipped": skipped,
+            "errors": errors,
+            "note": "SMS not delivered without Twilio — see server log lines notifications.DEMO_SMS.",
+        }
+
+    if not _twilio_sms_send_ready():
         logger.info("notifications.follow_up skip twilio_not_configured")
         return {"ok": False, "reason": "twilio_not_configured", "today": today_s}
 
@@ -188,29 +295,56 @@ def run_follow_up_reminders_for_today() -> dict[str, Any]:
 
 def send_daily_register_whatsapp() -> dict[str, Any]:
     """Build today's register from Qdrant and send to ANM WhatsApp (env)."""
+    today = datetime.now(IST).date()
+    body = build_daily_register_text(get_all_patients(), today)
+
+    if notifications_demo_mode():
+        p = _demo_e164_or_none()
+        if not p:
+            raise RuntimeError(
+                "Demo mode: set SAATHI_DEMO_PHONE=+91XXXXXXXXXX (E.164), or add Twilio + SAATHI_ANM_WHATSAPP_TO for real WhatsApp.",
+            )
+        url = _wa_me_url(p, body)
+        logger.info(
+            "notifications.DEMO_WA (not sent via Twilio). Open on your phone: %s\n-----\n%s\n-----",
+            url,
+            body[:2000],
+        )
+        return {
+            "ok": True,
+            "demo": True,
+            "to": f"whatsapp:{p}",
+            "sid": "demo",
+            "chars": len(body),
+            "whatsapp_open_url": url,
+            "note": "Use whatsapp_open_url in a browser to open your WhatsApp with this draft (no API send).",
+        }
+
     to = (os.environ.get("SAATHI_ANM_WHATSAPP_TO") or "").strip()
     if not to:
         raise RuntimeError("Set SAATHI_ANM_WHATSAPP_TO e.g. whatsapp:+9198xxxxxxxx")
-    today = datetime.now(IST).date()
-    body = build_daily_register_text(get_all_patients(), today)
     out = send_whatsapp(to, body)
     return {"ok": True, "to": to, "sid": out.get("sid"), "chars": len(body)}
 
 
 def notification_status() -> dict[str, Any]:
+    demo = notifications_demo_mode()
+    demo_phone = _demo_e164_or_none()
     return {
-        "twilio_sms_ready": bool(
-            (os.environ.get("TWILIO_ACCOUNT_SID") or "").strip()
-            and (os.environ.get("TWILIO_AUTH_TOKEN") or "").strip()
-            and (os.environ.get("TWILIO_SMS_FROM") or "").strip(),
-        ),
+        "demo_mode": demo,
+        "demo_phone_set": bool(demo_phone),
+        "twilio_sms_ready": _twilio_sms_send_ready(),
         "twilio_whatsapp_ready": bool(
-            (os.environ.get("TWILIO_ACCOUNT_SID") or "").strip()
-            and (os.environ.get("TWILIO_AUTH_TOKEN") or "").strip()
-            and (os.environ.get("TWILIO_WHATSAPP_FROM") or "").strip()
-            and (os.environ.get("SAATHI_ANM_WHATSAPP_TO") or "").strip(),
+            _twilio_whatsapp_send_ready() and (os.environ.get("SAATHI_ANM_WHATSAPP_TO") or "").strip(),
         ),
         "anm_whatsapp_to_set": bool((os.environ.get("SAATHI_ANM_WHATSAPP_TO") or "").strip()),
+        "notifications_usable": bool(
+            (demo and demo_phone)
+            or _twilio_sms_send_ready()
+            or (
+                _twilio_whatsapp_send_ready() and (os.environ.get("SAATHI_ANM_WHATSAPP_TO") or "").strip()
+            )
+        ),
     }
 
 
