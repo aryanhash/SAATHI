@@ -164,7 +164,9 @@ def send_whatsapp(to_whatsapp: str, body: str) -> dict[str, Any]:
     )
     if not r.ok:
         raise RuntimeError(f"Twilio WhatsApp failed: {r.status_code} {r.text[:200]}")
-    return r.json()
+    data = r.json()
+    logger.info("notifications.whatsapp sent to=%s sid=%s", to[:32], data.get("sid"))
+    return data
 
 
 def _parse_iso_date(s: Any) -> date | None:
@@ -372,9 +374,68 @@ def send_daily_register_whatsapp_all() -> dict[str, Any]:
         groups.setdefault(to, []).append(p)
 
     if not groups:
+        # No patient has registered_by_anm_whatsapp (visit saves must pass anm_whatsapp from the UI).
+        demo_d = _demo_e164_or_none()
+        if notifications_demo_mode() and demo_d:
+            body = build_daily_register_text(patients, today)
+            demo_to = demo_d
+            return {
+                "ok": True,
+                "demo": True,
+                "date": today.isoformat(),
+                "anm_count": 0,
+                "unassigned_patients": unassigned,
+                "drafts": [
+                    {
+                        "intended_to": "combined (no per-ANM tags on patients yet)",
+                        "demo_to": f"whatsapp:{demo_to}",
+                        "whatsapp_open_url": _wa_me_url(demo_to, body),
+                        "chars": len(body),
+                        "patient_total_for_anm": len(patients),
+                    }
+                ],
+                "note": "No registered_by_anm_whatsapp on patients — combined register draft. Save visits with ANM WhatsApp filled, or set SAATHI_ANM_WHATSAPP_TO for Twilio",
+            }
+        if not notifications_demo_mode():
+            to_leg = _normalize_whatsapp_to(os.environ.get("SAATHI_ANM_WHATSAPP_TO"))
+            if to_leg and _twilio_whatsapp_send_ready():
+                body = build_daily_register_text(patients, today)
+                try:
+                    out = send_whatsapp(to_leg, body)
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Twilio WhatsApp failed (SAATHI_ANM_WHATSAPP_TO fallback, no per-ANM tags on patients): {e}",
+                    ) from e
+                logger.info(
+                    "notifications.daily_wa_combined to=%s sid=%s chars=%s (no per-ANM groupings)",
+                    to_leg[:20] + "...",
+                    out.get("sid"),
+                    len(body),
+                )
+                return {
+                    "ok": True,
+                    "date": today.isoformat(),
+                    "anm_count": 0,
+                    "unassigned_patients": unassigned,
+                    "sent": 1,
+                    "fallback": "legacy_combined_all_patients",
+                    "note": "No per-ANM tags on patients; sent combined report to SAATHI_ANM_WHATSAPP_TO. "
+                    "For per-ANM messages, save visits with the ANM WhatsApp field set.",
+                    "results": [
+                        {
+                            "to": to_leg,
+                            "sid": out.get("sid"),
+                            "chars": len(body),
+                            "patient_total_for_anm": len(patients),
+                        }
+                    ],
+                    "errors": [],
+                }
         raise RuntimeError(
-            "No ANM WhatsApp numbers found on patient records. "
-            "Ensure the UI sends anm_whatsapp when saving visits so patients get tagged with registered_by_anm_whatsapp."
+            "No ANM WhatsApp on patient records. Fill “ANM WhatsApp” in the app and save visits, "
+            "or set SAATHI_ANM_WHATSAPP_TO in .env to send one combined report to a single number. "
+            "If you use the Twilio WhatsApp sandbox, the destination number must join the sandbox first. "
+            "If SAATHI_NOTIFICATIONS_DEMO=1, turn it off to send real messages."
         )
 
     # Demo mode: generate click-to-chat drafts (no Twilio send).

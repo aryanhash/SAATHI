@@ -1196,11 +1196,18 @@
             var r = await api("/api/notifications/daily-register/whatsapp/all", { method: "POST" });
             if (r.demo && r.drafts && r.drafts.length) {
               console.log("Daily register drafts:", r.drafts);
-              showToast("Demo: generated " + r.drafts.length + " WhatsApp drafts — opening the first (tap Send)");
+              showToast("Demo: generated " + r.drafts.length + " WhatsApp draft(s) — opening the first (tap Send)");
               window.open(r.drafts[0].whatsapp_open_url, "_blank", "noopener,noreferrer");
             } else {
               var sent = r.sent != null ? r.sent : (r.results ? r.results.length : 0);
-              showToast("Daily register sent to " + sent + " ANMs" + (r.errors && r.errors.length ? " (some failed)" : ""));
+              var msg = "Daily register · " + sent + " message(s) sent via Twilio";
+              if (r.fallback === "legacy_combined_all_patients") {
+                msg += " (all patients; add ANM WhatsApp on save to split by ANM)";
+              }
+              if (r.ok === false && r.errors && r.errors.length) {
+                msg += " — " + r.errors[0];
+              }
+              showToast(msg);
             }
           } catch (e) {
             showToast(String(e.message || e));
