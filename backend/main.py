@@ -44,7 +44,7 @@ from services.notifications import (
     start_reminder_background_thread,
 )
 from services.portal_mapper import build_portal_prefill
-from services.risk_engine import calculate_risk, detect_emergency
+from services.risk_engine import calculate_risk
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _BACKEND_DIR = Path(__file__).resolve().parent
@@ -586,18 +586,41 @@ def get_system_prompt() -> dict[str, Any]:
 @app.get("/api/session-prompt")
 def get_session_prompt() -> dict[str, Any]:
     """Return the AMBIENT SESSION prompt — silent scribe, multi-patient single call."""
-    return {
-        "prompt": SAATHI_SESSION_PROMPT,
-        "firstMessage": SAATHI_SESSION_FIRST_MESSAGE,
-        "boundary_words": [
-            "next", "next patient",
-            "aage", "agla", "agla patient", "dusra patient",
-        ],
-        "end_session_words": [
-            "session end", "session khatam", "bas done", "end session",
-        ],
-        "mode": "ambient_session",
-    }
+    try:
+        prompt = SAATHI_SESSION_PROMPT
+        first_message = SAATHI_SESSION_FIRST_MESSAGE
+        if not prompt:
+            logger.warning("session_prompt.empty falling back to system prompt default")
+            prompt = _FALLBACK_SYSTEM_PROMPT
+            first_message = _FALLBACK_FIRST_MESSAGE
+        return {
+            "prompt": prompt,
+            "firstMessage": first_message,
+            "boundary_words": [
+                "next", "next patient",
+                "aage", "agla", "agla patient", "dusra patient",
+            ],
+            "end_session_words": [
+                "session end", "session khatam", "bas done", "end session",
+            ],
+            "mode": "ambient_session",
+            "fallback": not bool(SAATHI_SESSION_PROMPT),
+        }
+    except Exception as exc:
+        logger.exception("session_prompt.error falling back to hardcoded default: %s", exc)
+        return {
+            "prompt": _FALLBACK_SYSTEM_PROMPT,
+            "firstMessage": _FALLBACK_FIRST_MESSAGE,
+            "boundary_words": [
+                "next", "next patient",
+                "aage", "agla", "agla patient", "dusra patient",
+            ],
+            "end_session_words": [
+                "session end", "session khatam", "bas done", "end session",
+            ],
+            "mode": "ambient_session",
+            "fallback": True,
+        }
 
 
 @app.post("/api/session-gap-prompt")
@@ -1207,8 +1230,9 @@ def store_patient_route(
     filtered = {k: v for k, v in body.items() if k in _ALLOWED_PATIENT_FIELDS}
     if not filtered:
         raise HTTPException(status_code=400, detail="No valid patient fields provided")
+    enriched = calculate_risk(filtered)
     try:
-        pid = store_patient(filtered)
+        pid = store_patient(enriched)
     except Exception as e:
         logger.exception("route.store_patient failed")
         raise HTTPException(status_code=503, detail="Storage service unavailable") from e
