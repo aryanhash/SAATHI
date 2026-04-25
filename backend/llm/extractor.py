@@ -1,4 +1,4 @@
-"""Extract structured patient fields from voice transcripts (Gemini on Render, Ollama locally)."""
+"""Extract structured patient fields from voice transcripts via Gemini."""
 
 from __future__ import annotations
 
@@ -12,10 +12,6 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-_OLLAMA_BASE = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
-OLLAMA_GENERATE_URL = f"{_OLLAMA_BASE}/api/generate"
-OLLAMA_MODEL = "qwen3:8b"
-
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_URL = (
     f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
@@ -25,17 +21,6 @@ REQUEST_TIMEOUT_SEC = 120
 
 
 def extraction_backend() -> str:
-    return _active_llm_backend()
-
-
-def _active_llm_backend() -> str:
-    """
-    Extraction backend. Default is **Gemini** (production).
-    Set ``SAATHI_LLM=ollama`` explicitly for local development without a Google API key.
-    """
-    force = (os.environ.get("SAATHI_LLM") or "").strip().lower()
-    if force == "ollama":
-        return "ollama"
     return "gemini"
 
 
@@ -127,23 +112,6 @@ def _parse_llm_json(raw: str, *, source: str) -> dict[str, Any]:
     return data
 
 
-def _extract_with_ollama(transcript: str) -> dict[str, Any]:
-    prompt = _build_prompt(transcript)
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json",
-    }
-    resp = requests.post(OLLAMA_GENERATE_URL, json=payload, timeout=REQUEST_TIMEOUT_SEC)
-    resp.raise_for_status()
-    body = resp.json()
-    raw = body.get("response")
-    if not isinstance(raw, str) or not raw.strip():
-        raise ValueError("Ollama response missing non-empty 'response' text")
-    return _parse_llm_json(raw, source="ollama")
-
-
 def _extract_with_gemini(transcript: str, api_key: str) -> dict[str, Any]:
     prompt = _build_prompt(transcript)
     body: dict[str, Any] = {
@@ -174,19 +142,11 @@ def _extract_with_gemini(transcript: str, api_key: str) -> dict[str, Any]:
 
 
 def extract_patient_data(transcript: str) -> dict[str, Any]:
-    """
-    Structured extraction: **Gemini by default** (set GEMINI_API_KEY or GOOGLE_API_KEY).
-    Use ``SAATHI_LLM=ollama`` only for local runs without a Google key.
-    """
-    backend = _active_llm_backend()
-    if backend == "gemini":
-        key = _gemini_api_key()
-        if not key:
-            raise ValueError(
-                "Extraction uses Gemini by default: set GEMINI_API_KEY or GOOGLE_API_KEY in .env. "
-                "For local development without Google AI, set SAATHI_LLM=ollama and run Ollama."
-            )
-        logger.info("llm.extract backend=gemini model=%s", GEMINI_MODEL)
-        return _extract_with_gemini(transcript, key)
-    logger.info("llm.extract backend=ollama model=%s", OLLAMA_MODEL)
-    return _extract_with_ollama(transcript)
+    """Structured extraction via Gemini (set GEMINI_API_KEY or GOOGLE_API_KEY)."""
+    key = _gemini_api_key()
+    if not key:
+        raise ValueError(
+            "GEMINI_API_KEY or GOOGLE_API_KEY must be set in .env for extraction."
+        )
+    logger.info("llm.extract backend=gemini model=%s", GEMINI_MODEL)
+    return _extract_with_gemini(transcript, key)

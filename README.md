@@ -6,7 +6,7 @@ Voice-first healthcare assistant for India's frontline health workers (ANM/ASHA)
 
 - **OPD session mode (Vapi)** — one call for the whole shift: **language first** (keypad 1–5: Hindi, English, Kannada, Tamil, Telugu), then **silent-scribe** behaviour: ANM dictates **ID → name → vitals → …**; saying **next** / **agla** / **aage** saves that patient and continues.
 - **Server-assisted gap prompts** — after ~2s pause, the UI can ask the backend for a **one-line** missing-field hint and speak it via the SDK (`/api/session-gap-prompt`).
-- **40+ field AI extraction** — Gemini (or **Ollama** fallback) extracts name, vitals, symptoms, medicines, vaccines, referral, follow-up date, phone, and more from natural speech.
+- **40+ field AI extraction** — Gemini extracts name, vitals, symptoms, medicines, vaccines, referral, follow-up date, phone, and more from natural speech.
 - **Emergency detection & routing** — rule-based thresholds plus keywords; severity **critical / urgent**; dashboard **108** and SOS tab.
 - **Portal mapping** — ANMOL/RCH, U-WIN (NIP schedule), NCD/NPCDCS-style prefill JSON per patient.
 - **Risk triage** — red / amber / green with factors.
@@ -24,7 +24,7 @@ Voice-first healthcare assistant for India's frontline health workers (ANM/ASHA)
 ## Architecture
 
 ```text
-Browser (Vapi SDK)  →  FastAPI  →  Gemini or Ollama (extraction + embeddings when configured)
+Browser (Vapi SDK)  →  FastAPI  →  Gemini (extraction + embeddings)
        ↓                    ↓
   Transcript chunks    Risk engine → Portal mapper
        ↓                    ↓
@@ -106,7 +106,7 @@ docker compose up -d        # http://127.0.0.1:6333
 Copy **`.env.example`** to **`.env`** in the repo root (or `backend/`) and set at least:
 
 - `VAPI_PUBLIC_KEY`, `VAPI_ASSISTANT_ID` — for voice from `/ui/`
-- `GEMINI_API_KEY` (or rely on **Ollama** locally with `SAATHI_LLM=ollama`)
+- `GEMINI_API_KEY`
 
 ```bash
 cp .env.example .env
@@ -216,8 +216,7 @@ CBAC-style screening, vitals with BMI calculation and category, hypertension/dia
 | `QDRANT_API_KEY` | Qdrant Cloud only; omit for local Docker |
 | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Prefer Gemini for extraction + embeddings |
 | `GEMINI_MODEL` | Default `gemini-2.5-flash` |
-| `SAATHI_LLM` | `gemini` or `ollama` to force one backend |
-| `OLLAMA_BASE_URL` | Default `http://127.0.0.1:11434` |
+
 | `VAPI_PUBLIC_KEY` | Browser SDK |
 | `VAPI_ASSISTANT_ID` | Assistant id for `vapiSDK.run` |
 | `TWILIO_*`, `SAATHI_ANM_WHATSAPP_TO` | Optional; see **Optional: Twilio** above |
@@ -232,15 +231,6 @@ docker compose down         # stop
 ```
 
 If Qdrant is unreachable, the app **falls back to in-memory** storage (data is lost when the process exits).
-
-### Ollama (Local LLM)
-
-```bash
-ollama pull qwen3:8b
-# Daemon at http://localhost:11434
-```
-
-Used when Gemini is not configured or `SAATHI_LLM=ollama`.
 
 ## Screenshots
 

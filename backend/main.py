@@ -338,15 +338,14 @@ async def lifespan(app: FastAPI):
     )
     port = os.environ.get("PORT", "(not set — use 8000 locally or $PORT on Render)")
     qmode = os.environ.get("QDRANT_URL", "http://127.0.0.1:6333")
-    ollama = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434 (default)")
     gemini = "set" if (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")) else "unset"
     qdrant_key = "set" if os.environ.get("QDRANT_API_KEY") else "unset"
     vapi_pk = "set" if os.environ.get("VAPI_PUBLIC_KEY") else "unset"
     vapi_aid = "set" if os.environ.get("VAPI_ASSISTANT_ID") else "unset"
     logger.info(
-        "saathi.boot PORT=%s QDRANT_URL=%s QDRANT_API_KEY=%s OLLAMA_BASE_URL=%s GEMINI_API_KEY=%s "
+        "saathi.boot PORT=%s QDRANT_URL=%s QDRANT_API_KEY=%s GEMINI_API_KEY=%s "
         "VAPI_PUBLIC_KEY=%s VAPI_ASSISTANT_ID=%s llm_backend=%s",
-        port, qmode, qdrant_key, ollama, gemini, vapi_pk, vapi_aid, extraction_backend(),
+        port, qmode, qdrant_key, gemini, vapi_pk, vapi_aid, extraction_backend(),
     )
     _fp = _REPO_ROOT / "frontend" / "index.html"
     if not _fp.is_file():
