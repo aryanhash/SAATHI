@@ -54,6 +54,32 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Hardcoded fallback prompts — used when the main prompt constant is empty or
+# when an exception occurs in the route handler (future-proofing for dynamic
+# prompt sources).  These are intentionally separate from SAATHI_SYSTEM_PROMPT
+# so the fallback is never a no-op.
+# ---------------------------------------------------------------------------
+_FALLBACK_SYSTEM_PROMPT = (
+    "You are SAATHI — a friendly, supportive voice assistant for India's "
+    "healthcare workers (ANMs/ASHAs). Start every call by asking the user's "
+    "preferred language (Hindi, English, Kannada, Tamil, Telugu). Once confirmed, "
+    "conduct the entire conversation in that language. Ask one question at a time. "
+    "Collect: patient name, age, gender, visit reason, symptoms, vitals "
+    "(BP, temp, pulse, SpO2, weight), tests, medicines, counseling, immunizations, "
+    "referral details, and follow-up date. If any emergency sign is mentioned "
+    "(severe breathlessness, chest pain, uncontrolled bleeding, convulsions, "
+    "unconsciousness, very high fever in infant, or pregnancy danger signs), "
+    "say clearly: 'This sounds like an emergency' and suggest calling 108. "
+    "Recap all details as structured bullets before ending. After user confirms, "
+    "call send_transcript and stop."
+)
+_FALLBACK_FIRST_MESSAGE = (
+    "Hello! I'm SAATHI — your health assistant. "
+    "\u0939\u093f\u0902\u0926\u0940 \u0915\u0947 \u0932\u093f\u090f 1 \u0926\u092c\u093e\u090f\u0902\u0964 For English, press 2. "
+    "Please select your preferred language."
+)
+
+# ---------------------------------------------------------------------------
 # Multi-language system prompt for Vapi assistant
 # ---------------------------------------------------------------------------
 SAATHI_SYSTEM_PROMPT = """\
@@ -512,9 +538,9 @@ def get_system_prompt() -> dict[str, Any]:
         prompt = SAATHI_SYSTEM_PROMPT
         first_message = SAATHI_FIRST_MESSAGE
         if not prompt:
-            logger.warning("system_prompt.empty falling back to default")
-            prompt = SAATHI_SYSTEM_PROMPT
-            first_message = SAATHI_FIRST_MESSAGE
+            logger.warning("system_prompt.empty falling back to hardcoded default")
+            prompt = _FALLBACK_SYSTEM_PROMPT
+            first_message = _FALLBACK_FIRST_MESSAGE
         return {
             "prompt": prompt,
             "firstMessage": first_message,
@@ -522,12 +548,13 @@ def get_system_prompt() -> dict[str, Any]:
                 "Hindi", "English", "Kannada", "Tamil", "Telugu",
             ],
             "usage": "These are automatically applied as Vapi assistant overrides when starting a call.",
+            "fallback": not bool(SAATHI_SYSTEM_PROMPT),
         }
     except Exception as exc:
-        logger.exception("system_prompt.error falling back to default: %s", exc)
+        logger.exception("system_prompt.error falling back to hardcoded default: %s", exc)
         return {
-            "prompt": SAATHI_SYSTEM_PROMPT,
-            "firstMessage": SAATHI_FIRST_MESSAGE,
+            "prompt": _FALLBACK_SYSTEM_PROMPT,
+            "firstMessage": _FALLBACK_FIRST_MESSAGE,
             "supported_languages": [
                 "Hindi", "English", "Kannada", "Tamil", "Telugu",
             ],
