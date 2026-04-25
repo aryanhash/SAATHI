@@ -50,8 +50,7 @@
           </svg>
         </div>
         <div class="text-center">
-          <span class="text-lg font-bold tracking-wide text-blue-700">SAATHI</span>
-          <p class="text-[10px] text-slate-400">Smart ANM Assistant for Total Health Intelligence</p>
+          <h1 class="m-0 text-lg font-bold tracking-wide text-blue-700">SAATHI</h1>
         </div>
         <div class="flex items-center gap-2">
           <span id="emergency-indicator" class="view-hidden h-2.5 w-2.5 rounded-full bg-red-500 pulse-emergency" title="Active emergencies"></span>
@@ -62,8 +61,7 @@
       <!-- HOME -->
       <div id="view-home" class="flex flex-1 flex-col">
         <section class="pt-2 text-center">
-          <h1 class="text-3xl font-bold tracking-tight">SAATHI</h1>
-          <p class="mt-1 text-sm text-slate-500">Voice Assistant for Healthcare Workers</p>
+          <p class="text-sm font-medium text-slate-600">Voice Assistant for Healthcare Workers</p>
           <p id="vapi-mode-chip" class="mt-2 inline-block rounded-full bg-slate-200 px-3 py-0.5 text-[11px] font-semibold text-slate-600">Demo mode</p>
           <p id="lang-chip" class="mt-1 inline-block rounded-full bg-indigo-50 px-3 py-0.5 text-[10px] font-semibold text-indigo-700">🗣 12 Languages Supported</p>
         </section>
@@ -79,8 +77,18 @@
             </svg>
             <span class="text-base font-semibold" id="start-call-label">Start Call</span>
           </button>
-          <button type="button" id="end-call" class="view-hidden mt-4 rounded-full border-2 border-red-200 bg-white px-5 py-2 text-sm font-semibold text-red-700 shadow-sm">End call</button>
+          <button type="button" id="end-call" class="view-hidden mt-4 rounded-full border-2 border-red-200 bg-white px-5 py-2 text-sm font-semibold text-red-700 shadow-sm">End Session</button>
           <p id="vapi-hint" class="mt-3 max-w-xs text-center text-[11px] leading-snug text-slate-500"></p>
+
+          <!-- Live SESSION patients panel (visible during an ambient session) -->
+          <div id="session-panel" class="view-hidden mt-4 w-full rounded-2xl border-2 border-blue-200 bg-blue-50 p-3">
+            <div class="flex items-center justify-between mb-2">
+              <p class="text-xs font-bold uppercase text-blue-800">Session — Patients logged</p>
+              <span id="session-count" class="rounded-full bg-blue-700 px-2 py-0.5 text-[10px] font-bold text-white">0</span>
+            </div>
+            <div id="session-list" class="flex flex-col gap-1.5 max-h-40 overflow-auto"></div>
+            <p id="session-current" class="mt-2 text-[10px] italic text-blue-700">Listening for first patient…</p>
+          </div>
           <div class="mt-4 flex items-end gap-1.5 text-blue-700" aria-live="polite">
             <div class="flex h-8 items-end gap-0.5">
               <span class="wave h-5 w-1 rounded-full bg-blue-600"></span>
@@ -138,6 +146,18 @@
         <div class="flex items-center justify-between">
           <h2 class="text-lg font-bold text-slate-900">Dashboard</h2>
           <button type="button" id="btn-seed" class="text-xs font-semibold text-blue-700 hover:underline">Load demo data</button>
+        </div>
+
+        <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+          <p class="text-xs font-bold uppercase tracking-wide text-slate-600">Reminders &amp; register</p>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <button type="button" id="btn-run-reminders" class="rounded-xl border border-emerald-300 bg-white px-3 py-2 text-[11px] font-semibold text-emerald-800 shadow-sm hover:bg-emerald-50">
+              Run visit-day SMS
+            </button>
+            <button type="button" id="btn-send-register-wa" class="rounded-xl border border-emerald-600 bg-emerald-600 px-3 py-2 text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-700">
+              WhatsApp daily register
+            </button>
+          </div>
         </div>
 
         <!-- Semantic Search -->
@@ -247,10 +267,13 @@
           <button type="button" id="detail-back" class="rounded-lg p-2 text-slate-600 hover:bg-slate-100" aria-label="Back">
             <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
           </button>
-          <div>
+          <div class="flex-1">
             <h2 id="detail-name" class="text-lg font-bold leading-tight">Patient</h2>
             <p id="detail-sub" class="text-xs text-slate-500"></p>
           </div>
+          <button type="button" id="btn-print-opd" class="rounded-xl bg-blue-700 px-3 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-600 disabled:opacity-50" disabled>
+            🖨 Print OPD
+          </button>
         </div>
 
         <!-- Emergency Alert in Detail -->
@@ -298,6 +321,40 @@
           </div>
         </div>
       </div>
+
+      <!-- EMERGENCY VIEW (SOS tab — same column as other views so no min-height gap) -->
+      <div id="view-emergency-view" class="view-hidden flex flex-1 flex-col gap-3 pb-4 pt-2">
+        <h2 class="text-lg font-bold text-red-800">🚨 Emergency Response</h2>
+
+        <div class="rounded-2xl bg-white p-4 shadow-soft">
+          <p class="text-xs font-bold uppercase text-slate-500 mb-2">Quick Actions</p>
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" id="btn-108" class="rounded-xl bg-red-600 py-3 text-sm font-bold text-white shadow-sm hover:bg-red-700">📞 Call 108</button>
+            <button type="button" id="btn-phc" class="rounded-xl bg-amber-600 py-3 text-sm font-bold text-white shadow-sm hover:bg-amber-700">🏥 Nearest PHC</button>
+            <button type="button" id="btn-district" class="rounded-xl bg-blue-600 py-3 text-sm font-bold text-white shadow-sm hover:bg-blue-700">🏨 District Hospital</button>
+            <button type="button" id="btn-helpline" class="rounded-xl bg-emerald-600 py-3 text-sm font-bold text-white shadow-sm hover:bg-emerald-700">📱 Health Helpline</button>
+          </div>
+        </div>
+
+        <div class="rounded-2xl bg-white p-4 shadow-soft">
+          <p class="text-xs font-bold uppercase text-red-600 mb-2">Emergency Checklist</p>
+          <div class="flex flex-col gap-2 text-xs text-slate-700">
+            <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> Vitals recorded</label>
+            <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> Ambulance called (108)</label>
+            <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> PHC/CHC informed</label>
+            <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> Referral slip prepared</label>
+            <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> Family member informed</label>
+            <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> Patient stabilized for transport</label>
+          </div>
+        </div>
+
+        <div>
+          <p class="text-xs font-bold uppercase text-slate-500 mb-2">Active Emergency Cases</p>
+          <div id="sos-emergency-list" class="flex flex-col gap-2">
+            <p class="text-xs text-slate-400">No active emergencies.</p>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Navigation -->
@@ -330,40 +387,6 @@
       </div>
     </nav>
 
-    <!-- EMERGENCY VIEW (dedicated tab) -->
-    <div id="view-emergency-view" class="view-hidden mx-auto max-w-md px-4 pb-28 pt-2">
-      <h2 class="text-lg font-bold text-red-800 mb-3">🚨 Emergency Response</h2>
-
-      <div class="rounded-2xl bg-white p-4 shadow-soft mb-4">
-        <p class="text-xs font-bold uppercase text-slate-500 mb-2">Quick Actions</p>
-        <div class="grid grid-cols-2 gap-2">
-          <button type="button" id="btn-108" class="rounded-xl bg-red-600 py-3 text-sm font-bold text-white shadow-sm hover:bg-red-700">📞 Call 108</button>
-          <button type="button" id="btn-phc" class="rounded-xl bg-amber-600 py-3 text-sm font-bold text-white shadow-sm hover:bg-amber-700">🏥 Nearest PHC</button>
-          <button type="button" id="btn-district" class="rounded-xl bg-blue-600 py-3 text-sm font-bold text-white shadow-sm hover:bg-blue-700">🏨 District Hospital</button>
-          <button type="button" id="btn-helpline" class="rounded-xl bg-emerald-600 py-3 text-sm font-bold text-white shadow-sm hover:bg-emerald-700">📱 Health Helpline</button>
-        </div>
-      </div>
-
-      <div class="rounded-2xl bg-white p-4 shadow-soft mb-4">
-        <p class="text-xs font-bold uppercase text-red-600 mb-2">Emergency Checklist</p>
-        <div class="flex flex-col gap-2 text-xs text-slate-700">
-          <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> Vitals recorded</label>
-          <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> Ambulance called (108)</label>
-          <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> PHC/CHC informed</label>
-          <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> Referral slip prepared</label>
-          <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> Family member informed</label>
-          <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> Patient stabilized for transport</label>
-        </div>
-      </div>
-
-      <div>
-        <p class="text-xs font-bold uppercase text-slate-500 mb-2">Active Emergency Cases</p>
-        <div id="sos-emergency-list" class="flex flex-col gap-2">
-          <p class="text-xs text-slate-400">No active emergencies.</p>
-        </div>
-      </div>
-    </div>
-
     <script>
       (function () {
         var MOCK_TRANSCRIPT = "Sunita 28 saal 7 mahine pregnant BP 150/95 Hb 6.8 weight 52 pairo mein sujan hai sir dard";
@@ -379,11 +402,22 @@
           return t;
         }
 
-        var qs = new URLSearchParams(window.location.search);
+        /** Escape HTML entities to prevent XSS when building innerHTML strings. */
+        function esc(str) {
+          if (str == null) return "";
+          return String(str)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+        }
+
         var API_BASE = (getMeta("saathi-api") || window.location.origin).replace(/\/$/, "");
 
-        var VAPI_PUBLIC_KEY = vapiCredential(qs.get("vapi_pk")) || vapiCredential(getMeta("vapi-public-key"));
-        var VAPI_ASSISTANT_ID = vapiCredential(qs.get("vapi_aid")) || vapiCredential(getMeta("vapi-assistant-id"));
+        // Only accept Vapi credentials from server-injected meta tags (not URL params)
+        var VAPI_PUBLIC_KEY = vapiCredential(getMeta("vapi-public-key"));
+        var VAPI_ASSISTANT_ID = vapiCredential(getMeta("vapi-assistant-id"));
         var VAPI_CONFIGURED = !!(VAPI_PUBLIC_KEY && VAPI_ASSISTANT_ID);
 
         async function bootstrapVapiFromServer() {
@@ -413,9 +447,9 @@
 
         var refreshTimer = null;
         var portalData = null;
+        var currentDetailPatientId = null;
         var vapiScriptLoaded = false;
         var vapiInstance = null;
-        var callTranscriptParts = [];
         var DEFAULT_SYSTEM_PROMPT = "You are SAATHI — a friendly, supportive voice assistant for India's healthcare workers (ANMs/ASHAs). "
           + "Start every call by asking the user's preferred language (Hindi, English, Kannada, Tamil, Telugu). "
           + "Once confirmed, conduct the entire conversation in that language. "
@@ -432,16 +466,41 @@
         var cachedSystemPrompt = DEFAULT_SYSTEM_PROMPT;
         var cachedFirstMessage = DEFAULT_FIRST_MESSAGE;
 
-        // Pre-fetch system prompt for Vapi overrides (falls back to defaults on any error)
+        // ---- Ambient session state (multi-patient single call) ----
+        var sessionActive = false;
+        var currentPatientParts = [];   // transcript chunks for the patient currently being dictated
+        var sessionPatients = [];        // [{name, patient_id, risk_level, transcript}]
+        var lastBoundaryAt = 0;          // debounce — ignore "next" within 2s of previous
+        var pauseGapTimer = null;
+        var lastGapPromptForBlob = null; // avoid repeating same prompt for identical transcript
+        // Client vapi.say() gap inject competes with Vapi's own model + can cause double-talk / "silence" meta lines.
+        // Keep false; missing-field questions come from the assistant per system prompt only.
+        var ENABLE_CLIENT_GAP_INJECT = false;
+
+        // Boundary words spoken by the ANM to mark the end of one patient
+        var BOUNDARY_PATTERNS = [
+          /\bnext\s+patient\b/i,
+          /\bnext\b\s*[\.,!]?$/i,            // "...next." at end of utterance
+          /\b(?:agla|aage|dusra)\s+patient\b/i,
+          /\b(?:agla|aage)\b\s*[\.,!]?$/i,
+          /\bnaya\s+patient\b/i,
+        ];
+        var END_SESSION_PATTERNS = [
+          /\bsession\s+(?:end|khatam|complete|done)\b/i,
+          /\bend\s+session\b/i,
+          /\bbas\s+(?:done|khatam|ho gaya)\b/i,
+        ];
+
+        // Pre-fetch SESSION prompt for Vapi overrides (falls back to defaults on any error)
         (function prefetchPrompt() {
-          fetch(API_BASE + "/api/system-prompt")
+          fetch(API_BASE + "/api/session-prompt")
             .then(function(r) {
               if (!r.ok) {
-                console.warn("SAATHI: /api/system-prompt returned HTTP " + r.status + ", using default prompt");
+                console.warn("SAATHI: /api/session-prompt returned HTTP " + r.status + ", using default prompt");
                 return null;
               }
               return r.json().catch(function(parseErr) {
-                console.warn("SAATHI: /api/system-prompt returned malformed JSON, using default prompt", parseErr);
+                console.warn("SAATHI: /api/session-prompt returned malformed JSON, using default prompt", parseErr);
                 return null;
               });
             })
@@ -451,11 +510,11 @@
                 cachedFirstMessage = (typeof j.firstMessage === "string" && j.firstMessage.length > 0)
                   ? j.firstMessage : DEFAULT_FIRST_MESSAGE;
               } else if (j !== null) {
-                console.warn("SAATHI: /api/system-prompt response missing 'prompt' field, using default prompt");
+                console.warn("SAATHI: /api/session-prompt response missing 'prompt' field, using default prompt");
               }
             })
             .catch(function(networkErr) {
-              console.warn("SAATHI: Failed to fetch /api/system-prompt (network error), using default prompt", networkErr);
+              console.warn("SAATHI: Failed to fetch /api/session-prompt (network error), using default prompt", networkErr);
             });
         })();
 
@@ -510,14 +569,14 @@
 
         function renderPatientCard(p) {
           var tag = tagForPatient(p);
-          var bp = p.blood_pressure || "—";
-          var hb = p.hemoglobin_g_dl != null ? p.hemoglobin_g_dl + " g/dL" : "—";
-          var id = p.patient_id || "";
+          var bp = esc(p.blood_pressure || "—");
+          var hb = p.hemoglobin_g_dl != null ? esc(p.hemoglobin_g_dl + " g/dL") : "—";
+          var id = esc(p.patient_id || "");
           var em = p.emergency || {};
           var isEmergency = em.is_emergency;
-          var loc = p.location ? '<span class="text-[10px] text-slate-400">📍 ' + p.location + '</span>' : '';
+          var loc = p.location ? '<span class="text-[10px] text-slate-400">📍 ' + esc(p.location) + '</span>' : '';
           var emergencyBadge = isEmergency
-            ? '<span class="rounded-md bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700 pulse-emergency">🚨 ' + (em.severity || "").toUpperCase() + '</span>'
+            ? '<span class="rounded-md bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700 pulse-emergency">🚨 ' + esc((em.severity || "").toUpperCase()) + '</span>'
             : '';
           var referralBadge = p.referral_needed
             ? '<span class="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">↗ Referral</span>'
@@ -529,23 +588,26 @@
             (isEmergency ? ' emergency-glow' : '') +
             '" data-patient-id="' + id + '">' +
             '<div class="flex items-start justify-between gap-2">' +
-            '<div><p class="font-bold text-slate-900">' + (p.patient_name || "Unknown") + '</p>' +
-            '<p class="text-xs text-slate-500">' + (p.age_years != null ? p.age_years + ' yrs' : '—') +
-            (p.gender ? ' · ' + p.gender : '') + ' · ' + tag + '</p>' + loc + '</div>' +
+            '<div><p class="font-bold text-slate-900">' + esc(p.patient_name || "Unknown") + '</p>' +
+            '<p class="text-xs text-slate-500">' + (p.age_years != null ? esc(p.age_years) + ' yrs' : '—') +
+            (p.gender ? ' · ' + esc(p.gender) : '') + ' · ' + esc(tag) + '</p>' + loc + '</div>' +
             '<div class="flex flex-col items-end gap-1">' +
             '<div class="flex items-center gap-1">' +
-            '<span class="rounded-md px-2 py-0.5 text-[10px] font-bold ' + tagCls + '">' + tag + '</span>' +
+            '<span class="rounded-md px-2 py-0.5 text-[10px] font-bold ' + tagCls + '">' + esc(tag) + '</span>' +
             riskDot(p.risk_level) + '</div>' + emergencyBadge + referralBadge + '</div></div>' +
             '<div class="mt-3 grid grid-cols-3 gap-2 text-xs">' +
             '<div class="rounded-lg bg-slate-50 px-2 py-2 text-slate-600"><span class="text-slate-400">BP</span><br/><span class="font-semibold text-slate-800">' + bp + '</span></div>' +
             '<div class="rounded-lg bg-slate-50 px-2 py-2 text-slate-600"><span class="text-slate-400">Hb</span><br/><span class="font-semibold text-slate-800">' + hb + '</span></div>' +
-            '<div class="rounded-lg bg-slate-50 px-2 py-2 text-slate-600"><span class="text-slate-400">SpO2</span><br/><span class="font-semibold text-slate-800">' + (p.spo2_percent ? p.spo2_percent + '%' : '—') + '</span></div>' +
+            '<div class="rounded-lg bg-slate-50 px-2 py-2 text-slate-600"><span class="text-slate-400">SpO2</span><br/><span class="font-semibold text-slate-800">' + (p.spo2_percent ? esc(p.spo2_percent) + '%' : '—') + '</span></div>' +
             '</div>' +
-            '<div class="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">' +
+            '<div class="mt-3 flex items-center justify-between gap-2 border-t border-slate-100 pt-3">' +
             '<span class="text-xs text-emerald-600">✓ Portal ready' +
-            (p.visit_count > 1 ? ' <span class="text-[10px] text-blue-600">· ' + p.visit_count + ' visits</span>' : '') +
+            (p.visit_count > 1 ? ' <span class="text-[10px] text-blue-600">· ' + esc(p.visit_count) + ' visits</span>' : '') +
             '</span>' +
-            '<span class="rounded-lg bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white">View details</span>' +
+            '<div class="flex items-center gap-1.5">' +
+            '<button type="button" class="card-print-opd rounded-lg border border-blue-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-50" data-print-id="' + id + '">🖨 OPD</button>' +
+            '<span class="rounded-lg bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white">View</span>' +
+            '</div>' +
             '</div></article>'
           );
         }
@@ -554,13 +616,13 @@
           return (
             '<div class="rounded-xl border-2 border-red-200 bg-red-50 p-3 text-sm emergency-glow">' +
             '<div class="flex items-center justify-between">' +
-            '<p class="font-bold text-red-900">' + (e.patient_name || "Unknown") + '</p>' +
-            '<span class="rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold text-white">' + (e.severity || "").toUpperCase() + '</span>' +
+            '<p class="font-bold text-red-900">' + esc(e.patient_name || "Unknown") + '</p>' +
+            '<span class="rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold text-white">' + esc((e.severity || "").toUpperCase()) + '</span>' +
             '</div>' +
-            '<p class="mt-1 text-xs text-red-800">' + (e.reasons || []).join(", ") + '</p>' +
-            '<p class="mt-1 text-xs font-semibold text-red-700">' + (e.recommended_action || "") + '</p>' +
-            (e.location ? '<p class="mt-1 text-[10px] text-red-600">📍 ' + e.location + '</p>' : '') +
-            (e.phone ? '<p class="mt-1 text-[10px] text-red-600">📱 ' + e.phone + '</p>' : '') +
+            '<p class="mt-1 text-xs text-red-800">' + esc((e.reasons || []).join(", ")) + '</p>' +
+            '<p class="mt-1 text-xs font-semibold text-red-700">' + esc(e.recommended_action || "") + '</p>' +
+            (e.location ? '<p class="mt-1 text-[10px] text-red-600">📍 ' + esc(e.location) + '</p>' : '') +
+            (e.phone ? '<p class="mt-1 text-[10px] text-red-600">📱 ' + esc(e.phone) + '</p>' : '') +
             '</div>'
           );
         }
@@ -656,8 +718,8 @@
                 var em = r.emergency || {};
                 var badge = em.is_emergency ? ' <span class="text-[10px] font-bold text-red-600 pulse-emergency">🚨</span>' : '';
                 return '<p class="rounded-xl border border-red-100 bg-white px-3 py-2 text-sm text-red-900">' +
-                  (r.patient_name || "—") + " · " + (r.blood_pressure || "—") + badge +
-                  (r.location ? ' <span class="text-[10px] text-slate-400">📍' + r.location + '</span>' : '') +
+                  esc(r.patient_name || "—") + " · " + esc(r.blood_pressure || "—") + badge +
+                  (r.location ? ' <span class="text-[10px] text-slate-400">📍' + esc(r.location) + '</span>' : '') +
                   '</p>';
               }).join("")
             : '<p class="text-xs text-slate-500">No red-risk patients.</p>';
@@ -806,55 +868,86 @@
           }, 500);
 
           vapiInstance.on("call-start", function () {
-            callTranscriptParts = [];
-            setReady("LIVE");
+            clearPauseGapTimer();
+            lastGapPromptForBlob = null;
+            currentPatientParts = [];
+            sessionPatients = [];
+            sessionActive = true;
+            lastBoundaryAt = 0;
+            setReady("SESSION");
             var sc2 = $("start-call"); var ec2 = $("end-call");
             if (sc2) sc2.classList.add("view-hidden");
             if (ec2) ec2.classList.remove("view-hidden");
+            renderSessionPanel();
+            $("session-panel").classList.remove("view-hidden");
+            $("session-current").textContent = "Listening for first patient…";
           });
 
           vapiInstance.on("message", function (msg) {
-            if (msg && msg.type === "transcript" && msg.transcriptType === "final" && msg.transcript) {
-              callTranscriptParts.push(msg.transcript);
+            if (!msg || msg.type !== "transcript") return;
+            // We listen to FINAL transcripts for the boundary detector + storage.
+            if (msg.transcriptType !== "final" || !msg.transcript) return;
+
+            var text = String(msg.transcript).trim();
+            var role = msg.role || msg.speaker || "user";
+            // Only the ANM's speech matters for buffering and boundary detection
+            if (role !== "user") return;
+
+            // End-of-session check first (so "session end next" doesn't get split)
+            if (matchesAny(text, END_SESSION_PATTERNS)) {
+              clearPauseGapTimer();
+              flushCurrentPatient(/*onEnd=*/true);
+              if (vapiInstance && typeof vapiInstance.stop === "function") {
+                try { vapiInstance.stop(); } catch (_) {}
+              }
+              return;
             }
+
+            // Patient boundary check
+            if (matchesAny(text, BOUNDARY_PATTERNS)) {
+              clearPauseGapTimer();
+              lastGapPromptForBlob = null;
+              var now = Date.now();
+              if (now - lastBoundaryAt < 2000) return; // debounce: ignore back-to-back
+              lastBoundaryAt = now;
+              // Strip the boundary word from the buffer; what remains belongs to the just-finished patient
+              var stripped = text.replace(/\b(next\s+patient|next|agla\s+patient|agla|aage\s+patient|aage|dusra\s+patient|naya\s+patient)\b\s*[\.,!]?/i, "").trim();
+              if (stripped) currentPatientParts.push(stripped);
+              flushCurrentPatient(/*onEnd=*/false);
+              return;
+            }
+
+            currentPatientParts.push(text);
+            lastGapPromptForBlob = null;
+            updateCurrentSnippet();
+            if (ENABLE_CLIENT_GAP_INJECT) schedulePauseGapCheck();
           });
 
           vapiInstance.on("call-end", function () {
+            clearPauseGapTimer();
+            sessionActive = false;
             var ec = $("end-call"); var sc = $("start-call");
             if (ec) ec.classList.add("view-hidden");
             if (sc) sc.classList.remove("view-hidden");
             setReady("SAVING");
 
-            var fullTranscript = callTranscriptParts.join(" ").trim();
-            callTranscriptParts = [];
+            // Save any in-progress patient as the final one
+            flushCurrentPatient(/*onEnd=*/true);
 
-            if (fullTranscript.length > 0) {
-              showToast("Call ended — saving visit data…");
-              api("/simulate-call", { method: "POST", body: JSON.stringify({ transcript: fullTranscript }) })
-                .then(function (res) {
-                  var name = res && res.patient && res.patient.patient_name;
-                  var em = res && res.patient && res.patient.emergency;
-                  if (em && em.is_emergency) {
-                    showToast("⚠ EMERGENCY: " + (name || "Patient") + " — " + em.severity);
-                  } else {
-                    showToast("Saved · " + (name || "OK") + " — opening dashboard");
-                  }
-                  setReady("READY");
-                  loadDashboard();
-                  showView("dashboard");
-                })
-                .catch(function (e) {
-                  showToast("Save error: " + (e.message || e));
-                  setReady("READY");
-                  loadDashboard();
-                  showView("dashboard");
-                });
+            // Show summary, then jump to dashboard
+            var n = sessionPatients.length;
+            if (n === 0) {
+              showToast("Session ended — no patients captured");
             } else {
-              showToast("Call ended — no transcript captured (too short?)");
-              setReady("READY");
-              loadDashboard();
-              showView("dashboard");
+              showToast("Session complete · " + n + " patient" + (n === 1 ? "" : "s") + " saved");
             }
+            setReady("READY");
+            // Hide session panel after a moment so the user can read the summary
+            setTimeout(function () {
+              if (!sessionActive) $("session-panel").classList.add("view-hidden");
+            }, 4000);
+            loadDashboard();
+            showView("dashboard");
           });
 
           vapiInstance.on("error", function (e) {
@@ -864,20 +957,162 @@
           return vapiInstance;
         }
 
+        // ---------------- Ambient session helpers ----------------
+
+        function matchesAny(text, patterns) {
+          for (var i = 0; i < patterns.length; i++) {
+            if (patterns[i].test(text)) return true;
+          }
+          return false;
+        }
+
+        function updateCurrentSnippet() {
+          var el = $("session-current");
+          if (!el) return;
+          var blob = currentPatientParts.join(" ").trim();
+          if (!blob) {
+            el.textContent = "Listening for first patient…";
+            return;
+          }
+          var preview = blob.length > 80 ? blob.slice(-80) : blob;
+          el.textContent = "🎙 Recording: …" + preview;
+        }
+
+        function renderSessionPanel() {
+          var list = $("session-list");
+          var count = $("session-count");
+          if (!list || !count) return;
+          count.textContent = String(sessionPatients.length);
+          if (sessionPatients.length === 0) {
+            list.innerHTML = '<p class="text-[11px] text-blue-600 italic">No patients yet — speak ID, name, age, vitals…</p>';
+            return;
+          }
+          list.innerHTML = sessionPatients.map(function (sp, i) {
+            var dot = sp.risk_level === "red" ? "bg-red-500"
+                    : sp.risk_level === "amber" ? "bg-amber-400"
+                    : "bg-emerald-500";
+            var pid = sp.patient_id ? sp.patient_id.slice(0, 8) : "—";
+            var em = sp.emergency_severity ? ' <span class="text-[9px] font-bold text-red-700 pulse-emergency">🚨 ' + sp.emergency_severity.toUpperCase() + '</span>' : '';
+            return '<div class="flex items-center gap-2 rounded-lg bg-white px-2 py-1.5 text-[11px]">' +
+              '<span class="font-bold text-blue-700">#' + (i + 1) + '</span>' +
+              '<span class="h-2 w-2 rounded-full ' + dot + '"></span>' +
+              '<span class="flex-1 font-semibold text-slate-800 truncate">' + (sp.name || "Unknown") + '</span>' +
+              em +
+              '<span class="text-[9px] text-slate-400">' + pid + '</span>' +
+              '</div>';
+          }).join("");
+        }
+
+        function clearPauseGapTimer() {
+          if (pauseGapTimer) {
+            clearTimeout(pauseGapTimer);
+            pauseGapTimer = null;
+          }
+        }
+
+        function tryVapiSay(text) {
+          if (!vapiInstance || !text) return;
+          var t = String(text).trim();
+          if (t.length < 4 || /^silence$/i.test(t) || /\bsilence\b/i.test(t)) return;
+          try {
+            if (typeof vapiInstance.say === "function") {
+              vapiInstance.say(t);
+              return;
+            }
+            if (typeof vapiInstance.send === "function") {
+              vapiInstance.send({ type: "say", message: t });
+              return;
+            }
+            if (typeof vapiInstance.sendMessage === "function") {
+              vapiInstance.sendMessage({ type: "add-message", message: { role: "assistant", content: t } });
+            }
+          } catch (err) {
+            console.warn("tryVapiSay", err);
+          }
+        }
+
+        function schedulePauseGapCheck() {
+          clearPauseGapTimer();
+          if (!sessionActive || !VAPI_CONFIGURED) return;
+          var snapshot = currentPatientParts.join(" ").trim();
+          if (snapshot.length < 28) return;
+          pauseGapTimer = setTimeout(function () {
+            pauseGapTimer = null;
+            if (!sessionActive) return;
+            var nowBlob = currentPatientParts.join(" ").trim();
+            if (nowBlob !== snapshot) return;
+            api("/api/session-gap-prompt", { method: "POST", body: JSON.stringify({ transcript: nowBlob }) })
+              .then(function (res) {
+                if (!sessionActive || !res || !res.say) return;
+                if (lastGapPromptForBlob === nowBlob) return;
+                lastGapPromptForBlob = nowBlob;
+                tryVapiSay(res.say);
+              })
+              .catch(function () {});
+          }, 2000);
+        }
+
+        function flushCurrentPatient(onEnd) {
+          clearPauseGapTimer();
+          lastGapPromptForBlob = null;
+          var transcript = currentPatientParts.join(" ").trim();
+          currentPatientParts = [];
+          updateCurrentSnippet();
+          if (!transcript) {
+            if (!onEnd) {
+              $("session-current").textContent = "Listening for next patient…";
+            }
+            return;
+          }
+          showToast("Saving visit…");
+          // Optimistic placeholder so the panel updates immediately
+          var placeholder = { name: "Saving…", patient_id: "", risk_level: "green" };
+          sessionPatients.push(placeholder);
+          renderSessionPanel();
+          var idx = sessionPatients.length - 1;
+
+          api("/simulate-call", { method: "POST", body: JSON.stringify({ transcript: transcript }) })
+            .then(function (res) {
+              var p = (res && res.patient) || {};
+              var em = p.emergency || {};
+              sessionPatients[idx] = {
+                name: p.patient_name || "Unknown",
+                patient_id: p.patient_id || "",
+                risk_level: p.risk_level || "green",
+                emergency_severity: em.is_emergency ? em.severity : null,
+                transcript: transcript,
+              };
+              renderSessionPanel();
+              if (em.is_emergency) {
+                showToast("🚨 EMERGENCY · " + (p.patient_name || "Patient") + " · " + (em.severity || "").toUpperCase());
+              } else {
+                showToast("Saved · " + (p.patient_name || "Patient #" + (idx + 1)));
+              }
+              if (!onEnd) $("session-current").textContent = "Listening for next patient…";
+              loadDashboard();
+            })
+            .catch(function (e) {
+              sessionPatients[idx] = { name: "⚠ Failed to save", patient_id: "", risk_level: "amber", transcript: transcript };
+              renderSessionPanel();
+              showToast("Save error: " + (e.message || e));
+              if (!onEnd) $("session-current").textContent = "Listening for next patient…";
+            });
+        }
+
         function initVapiUi() {
           var chip = $("vapi-mode-chip");
           var hint = $("vapi-hint");
           if (!chip || !hint) return;
           if (VAPI_CONFIGURED) {
-            chip.textContent = "Voice · Vapi";
+            chip.textContent = "Ambient session · Vapi";
             chip.className = "mt-2 inline-block rounded-full bg-emerald-100 px-3 py-0.5 text-[11px] font-semibold text-emerald-800";
-            hint.textContent = "Start Call opens the Vapi voice widget. The assistant will ask your preferred language first.";
-            $("start-call-label").textContent = "Start Call";
+            hint.textContent = "Choose language (1–5) first, then one session: ID, name, vitals; say \"next\" to save each patient. SAATHI only speaks for missing critical fields or emergencies — not for pauses.";
+            $("start-call-label").textContent = "Start Session";
           } else {
             chip.textContent = "Demo mode (no Vapi keys)";
             chip.className = "mt-2 inline-block rounded-full bg-slate-200 px-3 py-0.5 text-[11px] font-semibold text-slate-600";
-            hint.textContent = "Set VAPI_PUBLIC_KEY + VAPI_ASSISTANT_ID, then open /ui/. Start Call does not save a demo — use the link below.";
-            $("start-call-label").textContent = "Start Call";
+            hint.textContent = "Set VAPI_PUBLIC_KEY + VAPI_ASSISTANT_ID, then open /ui/. Or click \"Save demo visit\" below.";
+            $("start-call-label").textContent = "Start Session";
           }
         }
 
@@ -898,6 +1133,29 @@
             showToast(String(e.message || e));
           } finally {
             $("btn-seed").disabled = false;
+          }
+        });
+
+        on("btn-run-reminders", "click", async function () {
+          try {
+            var r = await api("/api/notifications/follow-up-reminders/run", { method: "POST" });
+            if (r.reason === "twilio_not_configured") {
+              showToast("Twilio not configured — add TWILIO_* to .env");
+            } else {
+              showToast("Visit-day SMS · sent: " + (r.sent || 0) + ", skipped: " + (r.skipped || 0));
+            }
+            loadDashboard();
+          } catch (e) {
+            showToast(String(e.message || e));
+          }
+        });
+
+        on("btn-send-register-wa", "click", async function () {
+          try {
+            var r = await api("/api/notifications/daily-register/whatsapp", { method: "POST" });
+            showToast("WhatsApp sent · " + (r.sid || "ok"));
+          } catch (e) {
+            showToast(String(e.message || e));
           }
         });
 
@@ -971,11 +1229,14 @@
 
         function openPatientDetail(id) {
           showView("detail");
+          currentDetailPatientId = id;
           $("detail-loading").classList.remove("view-hidden");
           $("detail-content").classList.add("view-hidden");
           $("detail-vitals").classList.add("view-hidden");
           $("detail-emergency").classList.add("view-hidden");
           $("portal-blurb").textContent = portalBlurb("anmol");
+          var printBtn = $("btn-print-opd");
+          if (printBtn) printBtn.disabled = !id;
 
           api("/portal-prefill/" + encodeURIComponent(id))
             .then(function (data) {
@@ -1044,14 +1305,23 @@
             });
         }
 
-        on("patient-list", "click", function (ev) {
+        function handlePatientListClick(ev) {
+          var printBtn = ev.target.closest(".card-print-opd");
+          if (printBtn) {
+            ev.stopPropagation();
+            ev.preventDefault();
+            var pid = printBtn.getAttribute("data-print-id");
+            if (!pid) return;
+            var url = API_BASE + "/patient/" + encodeURIComponent(pid) + "/prescription?autoprint=1";
+            window.open(url, "_blank", "noopener,width=820,height=900");
+            return;
+          }
           var card = ev.target.closest("[data-patient-id]");
           if (card) openPatientDetail(card.getAttribute("data-patient-id"));
-        });
-        on("history-list", "click", function (ev) {
-          var card = ev.target.closest("[data-patient-id]");
-          if (card) openPatientDetail(card.getAttribute("data-patient-id"));
-        });
+        }
+        on("patient-list", "click", handlePatientListClick);
+        on("history-list", "click", handlePatientListClick);
+        on("search-list", "click", handlePatientListClick);
 
         document.querySelectorAll(".portal-tab").forEach(function (tab) {
           tab.addEventListener("click", function () {
@@ -1069,6 +1339,15 @@
 
         on("detail-back", "click", function () { showView("dashboard"); });
 
+        on("btn-print-opd", "click", function () {
+          if (!currentDetailPatientId) {
+            showToast("No patient selected");
+            return;
+          }
+          var url = API_BASE + "/patient/" + encodeURIComponent(currentDetailPatientId) + "/prescription?autoprint=1";
+          window.open(url, "_blank", "noopener,width=820,height=900");
+        });
+
         bootstrapVapiFromServer()
           .catch(function () { return null; })
           .then(function () {
@@ -1079,7 +1358,7 @@
             } catch (err) {
               var m = err && err.message ? err.message : String(err);
               document.body.insertAdjacentHTML("afterbegin",
-                '<div style="position:fixed;left:0;right:0;top:0;z-index:9999;padding:12px;background:#fee;color:#7f1d1d;font:14px system-ui,sans-serif;border-bottom:2px solid #b91c1c;">SAATHI UI failed: ' + m + '</div>'
+                '<div style="position:fixed;left:0;right:0;top:0;z-index:9999;padding:12px;background:#fee;color:#7f1d1d;font:14px system-ui,sans-serif;border-bottom:2px solid #b91c1c;">SAATHI UI failed: ' + esc(m) + '</div>'
               );
             }
           });
