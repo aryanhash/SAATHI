@@ -454,10 +454,19 @@ def _extract_llm(transcript: str) -> dict[str, Any]:
     except requests.HTTPError as e:
         code = e.response.status_code if e.response is not None else "?"
         hint = (e.response.text[:240] + "…") if e.response is not None and e.response.text else ""
+        detail_msg = "LLM extraction service returned an error"
+        if e.response is not None and e.response.text:
+            try:
+                j = e.response.json()
+                em = (j.get("error") or {}).get("message")
+                if em:
+                    detail_msg = f"Gemini API ({code}): {em}"
+            except (ValueError, TypeError, AttributeError):
+                detail_msg = f"Gemini API ({code}): {hint or 'no body'}"
         logger.warning("pipeline.llm_http_error status=%s hint=%s", code, hint)
         raise HTTPException(
             status_code=502,
-            detail="LLM extraction service returned an error",
+            detail=detail_msg,
         ) from e
     except requests.RequestException as e:
         logger.warning("pipeline.llm_unreachable err=%s", e)

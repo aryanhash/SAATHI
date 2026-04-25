@@ -126,13 +126,14 @@ Open **`http://localhost:8000/ui/`** (trailing slash matters for the static rout
 1. Push this repo to GitHub.
 2. Create a **Web Service** on Render (Dockerfile at repo root, or native Python with root `backend` and `uvicorn main:app --host 0.0.0.0 --port $PORT`).
 3. Set environment variables (see table below). **`QDRANT_URL`** can be **Qdrant Cloud** HTTPS + `QDRANT_API_KEY`, or a reachable Qdrant instance.
-4. Vapi **webhook** (if you use server-side call end instead of only browser `simulate-call`):
+4. If **`/simulate-call`** or **Save demo visit** returns **502** on extraction: confirm **`GEMINI_API_KEY`** is set on Render (and matches Google AI Studio), API is enabled, and you are within quota. The JSON error body (now surfaced in the API response) often names the issue (e.g. wrong model, billing). Try **`GEMINI_MODEL=gemini-2.0-flash`** for lower latency. Voice delay *after* language is mostly **Vapi** (STT/TTS) and a large system prompt, not the extraction endpoint.
+5. Vapi **webhook** (if you use server-side call end instead of only browser `simulate-call`):
 
    ```
    https://<your-service>.onrender.com/vapi-webhook
    ```
 
-5. **Assistant text in Vapi dashboard** — keep in sync with what the app sends, or rely on overrides:
+6. **Assistant text in Vapi dashboard** — keep in sync with what the app sends, or rely on overrides:
    - Session UI: fetches **`/api/session-prompt`** and passes **assistantOverrides** (system + first message).
    - For tests inside Vapi only, paste the same prompt from that endpoint into the assistant.
 
