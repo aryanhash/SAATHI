@@ -319,6 +319,26 @@ def store_patient(data: dict[str, Any]) -> str:
     return pid
 
 
+def update_patient_fields(patient_id: str, updates: dict[str, Any]) -> bool:
+    """Merge `updates` into an existing point by id and re-upsert (same vector id)."""
+    row = get_patient_by_id(patient_id)
+    if row is None:
+        return False
+    merged = dict(row)
+    for k, v in updates.items():
+        if v is not None:
+            merged[k] = v
+    merged["patient_id"] = patient_id
+    client = _client()
+    vector = embed(merged)
+    client.upsert(
+        collection_name=COLLECTION,
+        points=[models.PointStruct(id=patient_id, vector=vector, payload=merged)],
+    )
+    logger.info("qdrant.patch ok patient_id=%s keys=%s", patient_id, list(updates.keys()))
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Retrieval with Qdrant-native filtering
 # ---------------------------------------------------------------------------
