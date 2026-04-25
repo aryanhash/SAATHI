@@ -380,9 +380,35 @@ def get_patient_by_id(patient_id: str) -> dict[str, Any] | None:
     return dict(found[0].payload)
 
 
-def _scroll_all(filt: models.Filter | None = None) -> list[dict[str, Any]]:
-    """Paginated scroll with optional Qdrant-native filter."""
+def _demo_exclude_condition() -> models.FieldCondition:
+    return models.FieldCondition(key="seeded_demo", match=models.MatchValue(value=True))
+
+
+def _scroll_all(
+    filt: models.Filter | None = None,
+    *,
+    include_demo: bool = False,
+) -> list[dict[str, Any]]:
+    """Paginated scroll with optional Qdrant-native filter.
+
+    When *include_demo* is False (default), patients with
+    ``seeded_demo=True`` are excluded at the DB level.
+    """
     client = _client()
+
+    if not include_demo:
+        exclude = _demo_exclude_condition()
+        if filt is None:
+            filt = models.Filter(must_not=[exclude])
+        else:
+            existing_must_not = list(filt.must_not or [])
+            existing_must_not.append(exclude)
+            filt = models.Filter(
+                must=filt.must,
+                should=filt.should,
+                must_not=existing_must_not,
+            )
+
     rows: list[dict[str, Any]] = []
     offset: str | int | None = None
     while True:
@@ -404,20 +430,21 @@ def _scroll_all(filt: models.Filter | None = None) -> list[dict[str, Any]]:
     return rows
 
 
-def get_all_patients() -> list[dict[str, Any]]:
-    return _scroll_all()
+def get_all_patients(*, include_demo: bool = False) -> list[dict[str, Any]]:
+    return _scroll_all(include_demo=include_demo)
 
 
-def get_patients_by_risk(level: str) -> list[dict[str, Any]]:
+def get_patients_by_risk(level: str, *, include_demo: bool = False) -> list[dict[str, Any]]:
     """DB-level filter by risk_level (no Python filtering)."""
     return _scroll_all(
         models.Filter(must=[
             models.FieldCondition(key="risk_level", match=models.MatchValue(value=level)),
-        ])
+        ]),
+        include_demo=include_demo,
     )
 
 
-def get_emergencies() -> list[dict[str, Any]]:
+def get_emergencies(*, include_demo: bool = False) -> list[dict[str, Any]]:
     """All patients where emergency.is_emergency is true (filtered at DB level)."""
     results = _scroll_all(
         models.Filter(must=[
@@ -425,7 +452,8 @@ def get_emergencies() -> list[dict[str, Any]]:
                 key="emergency.is_emergency",
                 match=models.MatchValue(value=True),
             ),
-        ])
+        ]),
+        include_demo=include_demo,
     )
     results.sort(key=lambda x: 0 if (x.get("emergency") or {}).get("severity") == "critical" else 1)
     return results
@@ -523,7 +551,7 @@ def delete_seeded_demo_points() -> int:
         return 0
 
 
-def search_similar(query: str, limit: int = 10) -> list[dict[str, Any]]:
+def search_similar(query: str, limit: int = 10, *, include_demo: bool = False) -> list[dict[str, Any]]:
     """
     Hybrid semantic search: dense vectors (Gemini) + lexical rerank on patient text.
     Pulls a wider HNSW candidate set, then reorders for phrase/token alignment.
@@ -533,14 +561,20 @@ def search_similar(query: str, limit: int = 10) -> list[dict[str, Any]]:
     embed_text = _search_query_for_embedding(qraw) if qraw else ""
     vector = embed(embed_text or "patient")
     fetch_max = min(100, max(limit * 4, max(16, limit)))
+    query_filter: models.Filter | None = None
+    if not include_demo:
+        query_filter = models.Filter(must_not=[_demo_exclude_condition()])
     try:
-        resp = client.query_points(
-            collection_name=COLLECTION,
-            query=vector,
-            limit=fetch_max,
-            with_payload=True,
-            search_params=models.SearchParams(hnsw_ef=max(64, min(200, limit * 12))),
-        )
+        qp_kwargs: dict[str, Any] = {
+            "collection_name": COLLECTION,
+            "query": vector,
+            "limit": fetch_max,
+            "with_payload": True,
+            "search_params": models.SearchParams(hnsw_ef=max(64, min(200, limit * 12))),
+        }
+        if query_filter:
+            qp_kwargs["query_filter"] = query_filter
+        resp = client.query_points(**qp_kwargs)
         hits = resp.points if hasattr(resp, "points") else resp
     except Exception as e:
         logger.warning("qdrant.search failed err=%s", e)

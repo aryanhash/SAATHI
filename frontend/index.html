@@ -145,7 +145,11 @@
       <div id="view-dashboard" class="view-hidden flex flex-1 flex-col gap-4 pb-4 pt-2">
         <div class="flex items-center justify-between">
           <h2 class="text-lg font-bold text-slate-900">Dashboard</h2>
-          <button type="button" id="btn-seed" class="text-xs font-semibold text-blue-700 hover:underline">Load demo data</button>
+          <span class="flex items-center gap-2">
+            <button type="button" id="btn-seed" class="text-xs font-semibold text-blue-700 hover:underline">Load demo data</button>
+            <button type="button" id="btn-hide-demo" class="view-hidden text-xs font-semibold text-red-600 hover:underline">Hide demo data</button>
+            <span id="demo-badge" class="view-hidden rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">DEMO</span>
+          </span>
         </div>
 
         <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
@@ -462,6 +466,7 @@
         var refreshTimer = null;
         var portalData = null;
         var currentDetailPatientId = null;
+        var _demoActive = false;
         var vapiScriptLoaded = false;
         var vapiInstance = null;
         var cachedSystemPrompt = null;
@@ -737,13 +742,28 @@
           if (analytics) renderVisitTypeBars(analytics);
         }
 
+        function demoQS() { return _demoActive ? "?include_demo=true" : ""; }
+
+        function updateDemoBadge() {
+          var badge = $("demo-badge");
+          var hideBtn = $("btn-hide-demo");
+          if (_demoActive) {
+            if (badge) badge.classList.remove("view-hidden");
+            if (hideBtn) hideBtn.classList.remove("view-hidden");
+          } else {
+            if (badge) badge.classList.add("view-hidden");
+            if (hideBtn) hideBtn.classList.add("view-hidden");
+          }
+        }
+
         async function loadDashboard() {
           try {
+            var qs = demoQS();
             var results = await Promise.all([
-              api("/patients"),
-              api("/risk-flags"),
-              api("/emergencies"),
-              api("/analytics"),
+              api("/patients" + qs),
+              api("/risk-flags" + qs),
+              api("/emergencies" + qs),
+              api("/analytics" + qs),
             ]);
             setConn(true);
             applyPatientLists(results[0], results[1], results[2], results[3]);
@@ -763,7 +783,7 @@
             $("search-results").classList.add("view-hidden");
             return;
           }
-          api("/search?q=" + encodeURIComponent(query) + "&limit=15")
+          api("/search?q=" + encodeURIComponent(query) + "&limit=15" + (_demoActive ? "&include_demo=true" : ""))
             .then(function (data) {
               var badge = $("search-mode-badge");
               if (badge) badge.textContent = (data.embedding_mode === "gemini") ? "AI hybrid" : "basic";
@@ -1162,13 +1182,22 @@
           try {
             $("btn-seed").disabled = true;
             await api("/seed-demo", { method: "POST" });
+            _demoActive = true;
             showToast("Demo patients loaded (10 realistic cases)");
+            updateDemoBadge();
             await loadDashboard();
           } catch (e) {
             showToast(String(e.message || e));
           } finally {
             $("btn-seed").disabled = false;
           }
+        });
+
+        on("btn-hide-demo", "click", async function () {
+          _demoActive = false;
+          updateDemoBadge();
+          showToast("Demo data hidden");
+          await loadDashboard();
         });
 
         on("btn-run-reminders", "click", async function () {
@@ -1301,7 +1330,7 @@
           api("/portal-prefill/" + encodeURIComponent(id))
             .then(function (data) {
               portalData = data;
-              return api("/patients");
+              return api("/patients" + demoQS());
             })
             .then(function (list) {
               var p = list.find(function (x) { return x.patient_id === id; }) || {};
@@ -1410,9 +1439,6 @@
 
         bootstrapVapiFromServer()
           .catch(function () { return null; })
-          .then(function () {
-            return api("/api/clear-seeded-demo", { method: "POST" }).catch(function () { return { removed: 0 }; });
-          })
           .then(function () {
             try {
               initVapiUi();

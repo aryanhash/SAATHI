@@ -686,10 +686,10 @@ def notifications_register_whatsapp_all() -> dict[str, Any]:
 
 
 @app.get("/patients")
-def list_patients(_key: str | None = Depends(verify_api_key)) -> list[dict[str, Any]]:
+def list_patients(include_demo: bool = False, _key: str | None = Depends(verify_api_key)) -> list[dict[str, Any]]:
     try:
-        rows = get_all_patients()
-        logger.info("route.patients ok count=%s", len(rows))
+        rows = get_all_patients(include_demo=include_demo)
+        logger.info("route.patients ok count=%s include_demo=%s", len(rows), include_demo)
         return rows
     except Exception as e:
         logger.warning("route.patients failed err=%s", e)
@@ -697,10 +697,10 @@ def list_patients(_key: str | None = Depends(verify_api_key)) -> list[dict[str, 
 
 
 @app.get("/risk-flags")
-def risk_flags(_key: str | None = Depends(verify_api_key)) -> list[dict[str, Any]]:
+def risk_flags(include_demo: bool = False, _key: str | None = Depends(verify_api_key)) -> list[dict[str, Any]]:
     """Red-risk patients — filtered at Qdrant DB level (not in Python)."""
     try:
-        reds = get_patients_by_risk("red")
+        reds = get_patients_by_risk("red", include_demo=include_demo)
         logger.info("route.risk_flags ok red_count=%s (db-filtered)", len(reds))
         return reds
     except Exception as e:
@@ -709,10 +709,10 @@ def risk_flags(_key: str | None = Depends(verify_api_key)) -> list[dict[str, Any
 
 
 @app.get("/emergencies")
-def emergencies(_key: str | None = Depends(verify_api_key)) -> list[dict[str, Any]]:
+def emergencies(include_demo: bool = False, _key: str | None = Depends(verify_api_key)) -> list[dict[str, Any]]:
     """Active emergencies — filtered at Qdrant DB level by emergency.is_emergency."""
     try:
-        emg_patients = db_get_emergencies()
+        emg_patients = db_get_emergencies(include_demo=include_demo)
         result: list[dict[str, Any]] = []
         for p in emg_patients:
             em = p.get("emergency", {})
@@ -735,10 +735,10 @@ def emergencies(_key: str | None = Depends(verify_api_key)) -> list[dict[str, An
 
 
 @app.get("/analytics")
-def analytics(_key: str | None = Depends(verify_api_key)) -> dict[str, Any]:
+def analytics(include_demo: bool = False, _key: str | None = Depends(verify_api_key)) -> dict[str, Any]:
     """Dashboard analytics: counts by risk, visit type, emergency stats."""
     try:
-        patients = get_all_patients()
+        patients = get_all_patients(include_demo=include_demo)
     except Exception:
         patients = []
 
@@ -786,7 +786,7 @@ def clear_seeded_demo(_key: str | None = Depends(verify_api_key)) -> dict[str, A
 
 
 @app.get("/search")
-def search_patients(q: str = "", limit: int = 10, _key: str | None = Depends(verify_api_key)) -> dict[str, Any]:
+def search_patients(q: str = "", limit: int = 10, include_demo: bool = False, _key: str | None = Depends(verify_api_key)) -> dict[str, Any]:
     """
     Hybrid search: vector similarity + lexical overlap on the same text used to embed patients.
     With Gemini embeddings, results align better with short clinical phrases (e.g. \"swelling feet\").
@@ -794,7 +794,7 @@ def search_patients(q: str = "", limit: int = 10, _key: str | None = Depends(ver
     if not q.strip():
         return {"query": q, "results": [], "embedding_mode": embedding_mode()}
     try:
-        results = search_similar(q.strip(), limit=min(max(limit, 1), 50))
+        results = search_similar(q.strip(), limit=min(max(limit, 1), 50), include_demo=include_demo)
         logger.info("route.search query=%r results=%s mode=%s", q, len(results), embedding_mode())
         return {"query": q, "results": results, "embedding_mode": embedding_mode()}
     except Exception as e:
