@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import html
 import json
 import logging
@@ -15,9 +16,10 @@ from typing import Any
 
 import requests
 from dotenv import load_dotenv
-from fastapi import Body, FastAPI, HTTPException, Request
+from fastapi import Body, Depends, FastAPI, HTTPException, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 from db.qdrant_client import (
@@ -333,13 +335,45 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="SAATHI", version="0.2.0", lifespan=lifespan)
 
+# ---------------------------------------------------------------------------
+# CORS — restrict origins in production via CORS_ORIGINS env var.
+# Default: allow all origins WITHOUT credentials (safe baseline).
+# Set CORS_ORIGINS to a comma-separated list of allowed origins for production.
+# ---------------------------------------------------------------------------
+_cors_origins_raw = os.environ.get("CORS_ORIGINS", "").strip()
+_cors_origins: list[str] = (
+    [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+    if _cors_origins_raw
+    else ["*"]
+)
+_cors_allow_credentials = _cors_origins != ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ---------------------------------------------------------------------------
+# API Key authentication
+# Set SAATHI_API_KEY env var to enable. When unset, auth is bypassed (dev mode).
+# ---------------------------------------------------------------------------
+_API_KEY = (os.environ.get("SAATHI_API_KEY") or "").strip()
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def verify_api_key(
+    api_key: str | None = Security(_api_key_header),
+) -> str | None:
+    """Validate the API key when SAATHI_API_KEY is configured."""
+    if not _API_KEY:
+        return None  # Auth disabled (dev mode)
+    if not api_key or not hmac.compare_digest(api_key, _API_KEY):
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    return api_key
 
 
 @app.middleware("http")
@@ -384,14 +418,16 @@ def _extract_llm(transcript: str) -> dict[str, Any]:
     except requests.HTTPError as e:
         code = e.response.status_code if e.response is not None else "?"
         hint = (e.response.text[:240] + "…") if e.response is not None and e.response.text else ""
+        logger.warning("pipeline.llm_http_error status=%s hint=%s", code, hint)
         raise HTTPException(
             status_code=502,
-            detail=f"LLM HTTP error ({extraction_backend()}): status={code} {hint}".strip(),
+            detail="LLM extraction service returned an error",
         ) from e
     except requests.RequestException as e:
+        logger.warning("pipeline.llm_unreachable err=%s", e)
         raise HTTPException(
             status_code=503,
-            detail=f"Cannot reach LLM ({extraction_backend()}): {e}",
+            detail="Cannot reach LLM extraction service",
         ) from e
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
@@ -405,12 +441,11 @@ def _run_voice_pipeline(
 ) -> dict[str, Any]:
     _t0 = time.perf_counter()
     logger.info("%s pipeline.begin transcript_chars=%s", log_prefix, len(transcript))
-    logger.info("%s pipeline.transcript %s", log_prefix, transcript)
     extracted = _extract_llm(transcript)
     logger.info(
-        "%s pipeline.extracted_json %s",
+        "%s pipeline.extracted keys=%s",
         log_prefix,
-        json.dumps(extracted, ensure_ascii=False, default=str),
+        list(extracted.keys()),
     )
     data = calculate_risk(extracted)
     logger.info("%s pipeline.risk risk_level=%s", log_prefix, data.get("risk_level"))
@@ -447,16 +482,11 @@ def root() -> str:
 
 
 @app.get("/health/llm")
-def health_llm() -> dict[str, Any]:
-    gemini_set = bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
+def health_llm(_key: str | None = Depends(verify_api_key)) -> dict[str, Any]:
     return {
         "llm_backend": extraction_backend(),
-        "gemini_key_present": gemini_set,
         "gemini_model": GEMINI_MODEL,
         "embedding_mode": embedding_mode(),
-        "saathi_llm_env": os.environ.get("SAATHI_LLM"),
-        "vapi_public_key_present": bool((os.environ.get("VAPI_PUBLIC_KEY") or "").strip()),
-        "vapi_assistant_id_present": bool((os.environ.get("VAPI_ASSISTANT_ID") or "").strip()),
     }
 
 
@@ -544,7 +574,7 @@ def notifications_register_whatsapp() -> dict[str, Any]:
 
 
 @app.get("/patients")
-def list_patients() -> list[dict[str, Any]]:
+def list_patients(_key: str | None = Depends(verify_api_key)) -> list[dict[str, Any]]:
     try:
         rows = get_all_patients()
         logger.info("route.patients ok count=%s", len(rows))
@@ -555,7 +585,7 @@ def list_patients() -> list[dict[str, Any]]:
 
 
 @app.get("/risk-flags")
-def risk_flags() -> list[dict[str, Any]]:
+def risk_flags(_key: str | None = Depends(verify_api_key)) -> list[dict[str, Any]]:
     """Red-risk patients — filtered at Qdrant DB level (not in Python)."""
     try:
         reds = get_patients_by_risk("red")
@@ -567,7 +597,7 @@ def risk_flags() -> list[dict[str, Any]]:
 
 
 @app.get("/emergencies")
-def emergencies() -> list[dict[str, Any]]:
+def emergencies(_key: str | None = Depends(verify_api_key)) -> list[dict[str, Any]]:
     """Active emergencies — filtered at Qdrant DB level by emergency.is_emergency."""
     try:
         emg_patients = db_get_emergencies()
@@ -593,7 +623,7 @@ def emergencies() -> list[dict[str, Any]]:
 
 
 @app.get("/analytics")
-def analytics() -> dict[str, Any]:
+def analytics(_key: str | None = Depends(verify_api_key)) -> dict[str, Any]:
     """Dashboard analytics: counts by risk, visit type, emergency stats."""
     try:
         patients = get_all_patients()
@@ -627,7 +657,7 @@ def analytics() -> dict[str, Any]:
 
 
 @app.get("/search")
-def search_patients(q: str = "", limit: int = 10) -> dict[str, Any]:
+def search_patients(q: str = "", limit: int = 10, _key: str | None = Depends(verify_api_key)) -> dict[str, Any]:
     """
     Semantic search: find patients whose records are most similar to the query.
     With Gemini embeddings → true semantic similarity (e.g. "headache pregnant" finds ANC patients with headache).
@@ -635,7 +665,7 @@ def search_patients(q: str = "", limit: int = 10) -> dict[str, Any]:
     if not q.strip():
         return {"query": q, "results": [], "embedding_mode": embedding_mode()}
     try:
-        results = search_similar(q.strip(), limit=min(limit, 50))
+        results = search_similar(q.strip(), limit=min(max(limit, 1), 50))
         logger.info("route.search query=%r results=%s mode=%s", q, len(results), embedding_mode())
         return {"query": q, "results": results, "embedding_mode": embedding_mode()}
     except Exception as e:
@@ -644,7 +674,7 @@ def search_patients(q: str = "", limit: int = 10) -> dict[str, Any]:
 
 
 @app.get("/patients/by-type/{visit_type}")
-def patients_by_type(visit_type: str) -> list[dict[str, Any]]:
+def patients_by_type(visit_type: str, _key: str | None = Depends(verify_api_key)) -> list[dict[str, Any]]:
     """Filter patients by visit type at DB level (ANC, PNC, NCD, immunization)."""
     try:
         rows = get_patients_by_visit_type(visit_type)
@@ -656,7 +686,7 @@ def patients_by_type(visit_type: str) -> list[dict[str, Any]]:
 
 
 @app.get("/portal-prefill/{patient_id}")
-def portal_prefill(patient_id: str) -> dict[str, Any]:
+def portal_prefill(patient_id: str, _key: str | None = Depends(verify_api_key)) -> dict[str, Any]:
     logger.info("route.portal_prefill lookup patient_id=%s", patient_id)
     row = get_patient_by_id(patient_id)
     if row is None:
@@ -936,7 +966,7 @@ def patient_prescription(patient_id: str) -> HTMLResponse:
 
 
 @app.post("/seed-demo")
-def seed_demo() -> dict[str, Any]:
+def seed_demo(_key: str | None = Depends(verify_api_key)) -> dict[str, Any]:
     """Insert realistic demo patients covering ANC, immunization, NCD, PNC, and emergencies."""
     mocks: list[dict[str, Any]] = [
         # ANC - Normal
@@ -1063,27 +1093,52 @@ def seed_demo() -> dict[str, Any]:
 
 
 @app.post("/process-visit")
-def process_visit(body: ProcessVisitBody) -> dict[str, Any]:
+def process_visit(body: ProcessVisitBody, _key: str | None = Depends(verify_api_key)) -> dict[str, Any]:
     logger.info("route.process_visit begin chars=%s", len(body.transcript))
     extracted = _extract_llm(body.transcript)
     out = calculate_risk(extracted)
     return out
 
 
+_ALLOWED_PATIENT_FIELDS = {
+    "patient_name", "age_years", "gender", "phone", "location",
+    "visit_type", "pregnancy_months", "gravida", "para", "lmp_date", "edd_date",
+    "blood_pressure", "blood_pressure_systolic", "blood_pressure_diastolic",
+    "hemoglobin_g_dl", "weight_kg", "height_cm", "bmi",
+    "temperature_f", "pulse_rate", "spo2_percent",
+    "random_blood_sugar_mg_dl", "fasting_blood_sugar_mg_dl",
+    "urine_albumin", "urine_sugar", "blood_group",
+    "symptoms", "diagnosis", "medicines_given",
+    "vaccines_given", "vaccines_due", "child_age_months", "child_weight_kg",
+    "breastfeeding_status", "tt_doses", "ifa_tablets_given", "calcium_tablets_given",
+    "referral_needed", "referral_facility", "referral_reason",
+    "follow_up_date", "counseling_done", "emergency_signs", "notes",
+    "language_used",
+}
+
+
 @app.post("/store-patient")
-def store_patient_route(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+def store_patient_route(
+    body: dict[str, Any] = Body(...),
+    _key: str | None = Depends(verify_api_key),
+) -> dict[str, Any]:
     if not isinstance(body, dict) or not body:
         raise HTTPException(status_code=400, detail="JSON object body required")
+    filtered = {k: v for k, v in body.items() if k in _ALLOWED_PATIENT_FIELDS}
+    if not filtered:
+        raise HTTPException(status_code=400, detail="No valid patient fields provided")
     try:
-        pid = store_patient(body)
+        pid = store_patient(filtered)
     except Exception as e:
         logger.exception("route.store_patient failed")
-        raise HTTPException(status_code=503, detail=f"Qdrant store failed: {e}") from e
+        raise HTTPException(status_code=503, detail="Storage service unavailable") from e
     return {"status": "stored", "patient_id": pid}
 
 
 @app.post("/vapi-webhook")
-async def vapi_webhook(request: Request) -> dict[str, Any]:
+async def vapi_webhook(
+    request: Request,
+) -> dict[str, Any]:
     logger.info("WEBHOOK_HIT path=/vapi-webhook")
     try:
         payload = await request.json()
@@ -1118,7 +1173,7 @@ async def vapi_webhook(request: Request) -> dict[str, Any]:
 
 
 @app.post("/simulate-call")
-def simulate_call(body: SimulateCallBody) -> dict[str, Any]:
+def simulate_call(body: SimulateCallBody, _key: str | None = Depends(verify_api_key)) -> dict[str, Any]:
     logger.info("route.simulate_call begin chars=%s", len(body.transcript))
     return _run_voice_pipeline(
         body.transcript.strip(),
