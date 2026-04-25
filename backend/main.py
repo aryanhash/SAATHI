@@ -663,7 +663,6 @@ def store_patient_route(
 @app.post("/vapi-webhook")
 async def vapi_webhook(
     request: Request,
-    _key: str | None = Depends(verify_api_key),
 ) -> dict[str, Any]:
     logger.info("WEBHOOK_HIT path=/vapi-webhook")
     try:
