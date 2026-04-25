@@ -50,8 +50,7 @@
           </svg>
         </div>
         <div class="text-center">
-          <span class="text-lg font-bold tracking-wide text-blue-700">SAATHI</span>
-          <p class="text-[10px] text-slate-400">Smart ANM Assistant for Total Health Intelligence</p>
+          <h1 class="m-0 text-lg font-bold tracking-wide text-blue-700">SAATHI</h1>
         </div>
         <div class="flex items-center gap-2">
           <span id="emergency-indicator" class="view-hidden h-2.5 w-2.5 rounded-full bg-red-500 pulse-emergency" title="Active emergencies"></span>
@@ -62,8 +61,7 @@
       <!-- HOME -->
       <div id="view-home" class="flex flex-1 flex-col">
         <section class="pt-2 text-center">
-          <h1 class="text-3xl font-bold tracking-tight">SAATHI</h1>
-          <p class="mt-1 text-sm text-slate-500">Voice Assistant for Healthcare Workers</p>
+          <p class="text-sm font-medium text-slate-600">Voice Assistant for Healthcare Workers</p>
           <p id="vapi-mode-chip" class="mt-2 inline-block rounded-full bg-slate-200 px-3 py-0.5 text-[11px] font-semibold text-slate-600">Demo mode</p>
           <p id="lang-chip" class="mt-1 inline-block rounded-full bg-indigo-50 px-3 py-0.5 text-[10px] font-semibold text-indigo-700">🗣 12 Languages Supported</p>
         </section>
@@ -152,7 +150,6 @@
 
         <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
           <p class="text-xs font-bold uppercase tracking-wide text-slate-600">Reminders &amp; register</p>
-          <p id="notif-status" class="mt-1 text-[11px] leading-snug text-slate-500">Loading…</p>
           <div class="mt-2 flex flex-wrap gap-2">
             <button type="button" id="btn-run-reminders" class="rounded-xl border border-emerald-300 bg-white px-3 py-2 text-[11px] font-semibold text-emerald-800 shadow-sm hover:bg-emerald-50">
               Run visit-day SMS
@@ -161,7 +158,6 @@
               WhatsApp daily register
             </button>
           </div>
-          <p class="mt-1.5 text-[10px] text-slate-400">SMS: patients with phone + follow-up date = today (IST). WhatsApp: summary of today&apos;s visits to ANM (Twilio).</p>
         </div>
 
         <!-- Semantic Search -->
@@ -325,6 +321,40 @@
           </div>
         </div>
       </div>
+
+      <!-- EMERGENCY VIEW (SOS tab — same column as other views so no min-height gap) -->
+      <div id="view-emergency-view" class="view-hidden flex flex-1 flex-col gap-3 pb-4 pt-2">
+        <h2 class="text-lg font-bold text-red-800">🚨 Emergency Response</h2>
+
+        <div class="rounded-2xl bg-white p-4 shadow-soft">
+          <p class="text-xs font-bold uppercase text-slate-500 mb-2">Quick Actions</p>
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" id="btn-108" class="rounded-xl bg-red-600 py-3 text-sm font-bold text-white shadow-sm hover:bg-red-700">📞 Call 108</button>
+            <button type="button" id="btn-phc" class="rounded-xl bg-amber-600 py-3 text-sm font-bold text-white shadow-sm hover:bg-amber-700">🏥 Nearest PHC</button>
+            <button type="button" id="btn-district" class="rounded-xl bg-blue-600 py-3 text-sm font-bold text-white shadow-sm hover:bg-blue-700">🏨 District Hospital</button>
+            <button type="button" id="btn-helpline" class="rounded-xl bg-emerald-600 py-3 text-sm font-bold text-white shadow-sm hover:bg-emerald-700">📱 Health Helpline</button>
+          </div>
+        </div>
+
+        <div class="rounded-2xl bg-white p-4 shadow-soft">
+          <p class="text-xs font-bold uppercase text-red-600 mb-2">Emergency Checklist</p>
+          <div class="flex flex-col gap-2 text-xs text-slate-700">
+            <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> Vitals recorded</label>
+            <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> Ambulance called (108)</label>
+            <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> PHC/CHC informed</label>
+            <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> Referral slip prepared</label>
+            <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> Family member informed</label>
+            <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> Patient stabilized for transport</label>
+          </div>
+        </div>
+
+        <div>
+          <p class="text-xs font-bold uppercase text-slate-500 mb-2">Active Emergency Cases</p>
+          <div id="sos-emergency-list" class="flex flex-col gap-2">
+            <p class="text-xs text-slate-400">No active emergencies.</p>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Navigation -->
@@ -356,40 +386,6 @@
         </button>
       </div>
     </nav>
-
-    <!-- EMERGENCY VIEW (dedicated tab) -->
-    <div id="view-emergency-view" class="view-hidden mx-auto max-w-md px-4 pb-28 pt-2">
-      <h2 class="text-lg font-bold text-red-800 mb-3">🚨 Emergency Response</h2>
-
-      <div class="rounded-2xl bg-white p-4 shadow-soft mb-4">
-        <p class="text-xs font-bold uppercase text-slate-500 mb-2">Quick Actions</p>
-        <div class="grid grid-cols-2 gap-2">
-          <button type="button" id="btn-108" class="rounded-xl bg-red-600 py-3 text-sm font-bold text-white shadow-sm hover:bg-red-700">📞 Call 108</button>
-          <button type="button" id="btn-phc" class="rounded-xl bg-amber-600 py-3 text-sm font-bold text-white shadow-sm hover:bg-amber-700">🏥 Nearest PHC</button>
-          <button type="button" id="btn-district" class="rounded-xl bg-blue-600 py-3 text-sm font-bold text-white shadow-sm hover:bg-blue-700">🏨 District Hospital</button>
-          <button type="button" id="btn-helpline" class="rounded-xl bg-emerald-600 py-3 text-sm font-bold text-white shadow-sm hover:bg-emerald-700">📱 Health Helpline</button>
-        </div>
-      </div>
-
-      <div class="rounded-2xl bg-white p-4 shadow-soft mb-4">
-        <p class="text-xs font-bold uppercase text-red-600 mb-2">Emergency Checklist</p>
-        <div class="flex flex-col gap-2 text-xs text-slate-700">
-          <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> Vitals recorded</label>
-          <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> Ambulance called (108)</label>
-          <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> PHC/CHC informed</label>
-          <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> Referral slip prepared</label>
-          <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> Family member informed</label>
-          <label class="flex items-center gap-2"><input type="checkbox" class="rounded text-red-600"> Patient stabilized for transport</label>
-        </div>
-      </div>
-
-      <div>
-        <p class="text-xs font-bold uppercase text-slate-500 mb-2">Active Emergency Cases</p>
-        <div id="sos-emergency-list" class="flex flex-col gap-2">
-          <p class="text-xs text-slate-400">No active emergencies.</p>
-        </div>
-      </div>
-    </div>
 
     <script>
       (function () {
@@ -453,6 +449,9 @@
         var lastBoundaryAt = 0;          // debounce — ignore "next" within 2s of previous
         var pauseGapTimer = null;
         var lastGapPromptForBlob = null; // avoid repeating same prompt for identical transcript
+        // Client vapi.say() gap inject competes with Vapi's own model + can cause double-talk / "silence" meta lines.
+        // Keep false; missing-field questions come from the assistant per system prompt only.
+        var ENABLE_CLIENT_GAP_INJECT = false;
 
         // Boundary words spoken by the ANM to mark the end of one patient
         var BOUNDARY_PATTERNS = [
@@ -694,19 +693,6 @@
           if (analytics) renderVisitTypeBars(analytics);
         }
 
-        function applyNotifStatus(s) {
-          var el = $("notif-status");
-          if (!el) return;
-          if (!s || typeof s !== "object") {
-            el.textContent = "Notification status unavailable.";
-            return;
-          }
-          var a = [];
-          a.push(s.twilio_sms_ready ? "Visit-day SMS: ready" : "Visit-day SMS: set TWILIO_* + TWILIO_SMS_FROM");
-          a.push(s.twilio_whatsapp_ready ? "WhatsApp register: ready" : "WhatsApp: set TWILIO_WHATSAPP_FROM + SAATHI_ANM_WHATSAPP_TO");
-          el.textContent = a.join(" · ");
-        }
-
         async function loadDashboard() {
           try {
             var results = await Promise.all([
@@ -714,11 +700,9 @@
               api("/risk-flags"),
               api("/emergencies"),
               api("/analytics"),
-              api("/api/notifications/status").catch(function () { return {}; }),
             ]);
             setConn(true);
             applyPatientLists(results[0], results[1], results[2], results[3]);
-            applyNotifStatus(results[4]);
           } catch (e) {
             setConn(false);
             if ($("patient-list"))
@@ -895,7 +879,7 @@
             currentPatientParts.push(text);
             lastGapPromptForBlob = null;
             updateCurrentSnippet();
-            schedulePauseGapCheck();
+            if (ENABLE_CLIENT_GAP_INJECT) schedulePauseGapCheck();
           });
 
           vapiInstance.on("call-end", function () {
@@ -987,17 +971,19 @@
 
         function tryVapiSay(text) {
           if (!vapiInstance || !text) return;
+          var t = String(text).trim();
+          if (t.length < 4 || /^silence$/i.test(t) || /\bsilence\b/i.test(t)) return;
           try {
             if (typeof vapiInstance.say === "function") {
-              vapiInstance.say(text);
+              vapiInstance.say(t);
               return;
             }
             if (typeof vapiInstance.send === "function") {
-              vapiInstance.send({ type: "say", message: text });
+              vapiInstance.send({ type: "say", message: t });
               return;
             }
             if (typeof vapiInstance.sendMessage === "function") {
-              vapiInstance.sendMessage({ type: "add-message", message: { role: "assistant", content: text } });
+              vapiInstance.sendMessage({ type: "add-message", message: { role: "assistant", content: t } });
             }
           } catch (err) {
             console.warn("tryVapiSay", err);
@@ -1037,6 +1023,7 @@
             }
             return;
           }
+          showToast("Saving visit…");
           // Optimistic placeholder so the panel updates immediately
           var placeholder = { name: "Saving…", patient_id: "", risk_level: "green" };
           sessionPatients.push(placeholder);
@@ -1078,7 +1065,7 @@
           if (VAPI_CONFIGURED) {
             chip.textContent = "Ambient session · Vapi";
             chip.className = "mt-2 inline-block rounded-full bg-emerald-100 px-3 py-0.5 text-[11px] font-semibold text-emerald-800";
-            hint.textContent = "Choose language (1–5) first, then one session: ID, name, vitals per patient; say \"next\" to save. After ~2s pause, SAATHI may ask one short question if a critical field is missing.";
+            hint.textContent = "Choose language (1–5) first, then one session: ID, name, vitals; say \"next\" to save each patient. SAATHI only speaks for missing critical fields or emergencies — not for pauses.";
             $("start-call-label").textContent = "Start Session";
           } else {
             chip.textContent = "Demo mode (no Vapi keys)";

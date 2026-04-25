@@ -1,19 +1,29 @@
-"""Rule-based gap detection for ambient session — suggests one short Hindi prompt."""
+"""Rule-based gap detection for ambient session — one short TTS line, language-aware."""
 
 from __future__ import annotations
 
 import re
 
 
-def suggest_gap_prompt(transcript: str) -> str | None:
+def _norm_session_language(session_language: str | None) -> str:
+    if not session_language:
+        return "hi"
+    s = session_language.strip().lower()
+    if s.startswith("en") or s in ("2", "english"):
+        return "en"
+    return "hi"
+
+
+def suggest_gap_prompt(transcript: str, session_language: str | None = None) -> str | None:
     """
-    After ~2s silence, if critical fields seem missing from the raw transcript,
-    return a single short line for TTS (else None).
+    If critical fields seem missing from the raw transcript, return one short line for TTS (else None).
+    ``session_language`` should match the ANM's keypad choice (``en`` / ``hi`` / …); English vs Hindi phrasing.
     """
     raw = transcript.strip()
     if len(raw) < 20:
         return None
     t = raw.lower()
+    lang = _norm_session_language(session_language)
 
     def has_bp() -> bool:
         if re.search(r"\b\d{2,3}\s*[/\s-]\s*\d{2,3}\b", raw):
@@ -22,14 +32,14 @@ def suggest_gap_prompt(transcript: str) -> str | None:
             return True
         if "blood pressure" in t:
             return True
-        if re.search(r"\bby\s*\d{2,3}\b", t):  # "150 by 95"
+        if re.search(r"\bby\s*\d{2,3}\b", t):
             return True
         return False
 
     def has_hb() -> bool:
         if re.search(r"\bhb\b", t):
             return True
-        if re.search(r"hemoglobin", t):
+        if re.search(r"\bhemoglobin\b", t):
             return True
         if re.search(r"\b\d+(\.\d+)?\s*(g\s*/\s*d\s*l|g/dl)\b", t):
             return True
@@ -90,32 +100,58 @@ def suggest_gap_prompt(transcript: str) -> str | None:
         )
     )
 
-    missing: list[str] = []
+    # Internal slot keys for bilingual formatting
+    slots: list[str] = []
 
     if pregnancy:
         if not has_pregnancy_months():
-            missing.append("garbh ke kitne mahine")
+            slots.append("preg_months")
         if not has_bp():
-            missing.append("BP")
+            slots.append("bp")
         if not has_hb():
-            missing.append("Hb")
+            slots.append("hb")
     elif child:
         if not has_weight():
-            missing.append("weight")
+            slots.append("weight")
         if not has_vaccine_hint():
-            missing.append("vaccine/teeka")
+            slots.append("vaccine")
     else:
         if not has_bp() and not has_complaint():
-            missing.extend(["BP", "mukhya shikayat"])
+            slots.extend(["bp", "complaint"])
         elif not has_bp():
-            missing.append("BP")
+            slots.append("bp")
         elif not has_complaint() and not has_hb():
-            missing.append("mukhya shikayat")
+            slots.append("complaint")
 
-    if not missing:
+    if not slots:
         return None
 
-    if len(missing) == 1:
-        return f"{missing[0]} confirm karein."
+    labels_hi: dict[str, str] = {
+        "preg_months": "garbh ke kitne mahine",
+        "bp": "BP",
+        "hb": "Hb",
+        "weight": "weight",
+        "vaccine": "vaccine/teeka",
+        "complaint": "mukhya shikayat",
+    }
+    labels_en: dict[str, str] = {
+        "preg_months": "months of pregnancy",
+        "bp": "blood pressure",
+        "hb": "hemoglobin",
+        "weight": "weight",
+        "vaccine": "vaccination details",
+        "complaint": "main complaint",
+    }
 
-    return " aur ".join(missing[:-1]) + " aur " + missing[-1] + " confirm karein."
+    if lang == "en":
+        parts = [labels_en[s] for s in slots]
+        if len(parts) == 1:
+            return f"Please confirm {parts[0]}."
+        if len(parts) == 2:
+            return f"Please confirm {parts[0]} and {parts[1]}."
+        return "Please confirm " + ", ".join(parts[:-1]) + f", and {parts[-1]}."
+
+    parts_hi = [labels_hi[s] for s in slots]
+    if len(parts_hi) == 1:
+        return f"{parts_hi[0]} confirm karein."
+    return " aur ".join(parts_hi[:-1]) + " aur " + parts_hi[-1] + " confirm karein."
