@@ -201,6 +201,8 @@ def _create_payload_indexes(client: QdrantClient) -> None:
         ("visit_type", models.PayloadSchemaType.KEYWORD),
         ("location", models.PayloadSchemaType.KEYWORD),
         ("seeded_demo", models.PayloadSchemaType.BOOL),
+        # Qdrant Cloud requires an index before filtering on this field (get_emergencies).
+        ("emergency.is_emergency", models.PayloadSchemaType.BOOL),
     ]
     for field, schema in indexes:
         try:
@@ -209,8 +211,9 @@ def _create_payload_indexes(client: QdrantClient) -> None:
                 field_name=field,
                 field_schema=schema,
             )
-        except Exception:
-            pass  # already exists or in-memory (indexes are optional)
+        except Exception as e:
+            # already exists, or local in-memory engine may ignore some index types
+            logger.debug("qdrant.payload_index skip field=%s err=%s", field, e)
 
 
 # ---------------------------------------------------------------------------
