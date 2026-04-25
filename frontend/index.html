@@ -492,14 +492,33 @@
           /\bbas\s+(?:done|khatam|ho gaya)\b/i,
         ];
 
-        // Pre-fetch SESSION prompt for Vapi overrides (ambient mode)
+        // Pre-fetch SESSION prompt for Vapi overrides (ambient mode).
+        // On failure, cachedSystemPrompt stays null so wireVapiOnce() skips
+        // assistantOverrides and Vapi uses its dashboard-configured prompt.
         (function prefetchPrompt() {
           fetch(API_BASE + "/api/session-prompt")
-            .then(function(r) { return r.ok ? r.json() : null; })
-            .then(function(j) {
-              if (j && j.prompt) { cachedSystemPrompt = j.prompt; cachedFirstMessage = j.firstMessage; }
+            .then(function(r) {
+              if (!r.ok) {
+                console.warn("SAATHI: /api/session-prompt returned HTTP " + r.status + ", Vapi will use dashboard config");
+                return null;
+              }
+              return r.json().catch(function(parseErr) {
+                console.warn("SAATHI: /api/session-prompt returned malformed JSON, Vapi will use dashboard config", parseErr);
+                return null;
+              });
             })
-            .catch(function() {});
+            .then(function(j) {
+              if (j && typeof j.prompt === "string" && j.prompt.length > 0) {
+                cachedSystemPrompt = j.prompt;
+                cachedFirstMessage = (typeof j.firstMessage === "string" && j.firstMessage.length > 0)
+                  ? j.firstMessage : null;
+              } else if (j !== null) {
+                console.warn("SAATHI: /api/session-prompt response missing 'prompt' field, Vapi will use dashboard config");
+              }
+            })
+            .catch(function(networkErr) {
+              console.warn("SAATHI: Failed to fetch /api/session-prompt (network error), Vapi will use dashboard config", networkErr);
+            });
         })();
 
         function showToast(msg) {

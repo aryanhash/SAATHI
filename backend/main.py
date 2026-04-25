@@ -55,6 +55,35 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Hardcoded fallback prompts — used when the main prompt constant is empty or
+# when an exception occurs in the route handler (future-proofing for dynamic
+# prompt sources).  These are intentionally separate from SAATHI_SYSTEM_PROMPT
+# so the fallback is never a no-op.
+# ---------------------------------------------------------------------------
+_FALLBACK_SYSTEM_PROMPT = (
+    "You are SAATHI — a friendly, supportive voice assistant for India's "
+    "healthcare workers (ANMs/ASHAs). Start every call by asking the user's "
+    "preferred language (Hindi, English, Kannada, Tamil, Telugu). Once confirmed, "
+    "conduct the entire conversation in that language. Ask one question at a time. "
+    "Collect: patient name, age, gender, visit reason, symptoms, vitals "
+    "(BP, temp, pulse, SpO2, weight), tests, medicines, counseling, immunizations, "
+    "referral details, and follow-up date. If any emergency sign is mentioned "
+    "(severe breathlessness, chest pain, uncontrolled bleeding, convulsions, "
+    "unconsciousness, very high fever in infant, or pregnancy danger signs), "
+    "say clearly: 'This sounds like an emergency' and suggest calling 108. "
+    "Recap all details as structured bullets before ending. After user confirms, "
+    "call send_transcript and stop."
+)
+_FALLBACK_FIRST_MESSAGE = (
+    "Hello! I'm SAATHI — your health assistant. "
+    "\u0939\u093f\u0902\u0926\u0940 \u0915\u0947 \u0932\u093f\u090f 1 \u0926\u092c\u093e\u090f\u0902\u0964 For English, press 2. "
+    "\u0c95\u0ca8\u0ccd\u0ca8\u0ca1\u0c95\u0ccd\u0c95\u0cbe\u0c97\u0cbf 3 \u0c92\u0ca4\u0ccd\u0ca4\u0cbf\u0cb0\u0cbf. "
+    "\u0ba4\u0bae\u0bbf\u0bb4\u0bc1\u0b95\u0bcd\u0b95\u0bc1 4 \u0b85\u0bb4\u0bc1\u0ba4\u0bcd\u0ba4\u0bb5\u0bc1\u0bae\u0bcd. "
+    "\u0c24\u0c46\u0c32\u0c41\u0c17\u0c41\u0c15\u0c41 5 \u0c28\u0c4a\u0c15\u0c4d\u0c15\u0c02\u0c21\u0c3f. "
+    "Please select your preferred language."
+)
+
+# ---------------------------------------------------------------------------
 # Multi-language system prompt for Vapi assistant
 # ---------------------------------------------------------------------------
 SAATHI_SYSTEM_PROMPT = """\
@@ -518,15 +547,40 @@ def vapi_client_config() -> dict[str, Any]:
 
 @app.get("/api/system-prompt")
 def get_system_prompt() -> dict[str, Any]:
-    """Return the multi-language system prompt and first message for Vapi assistant."""
-    return {
-        "prompt": SAATHI_SYSTEM_PROMPT,
-        "firstMessage": SAATHI_FIRST_MESSAGE,
-        "supported_languages": [
-            "Hindi", "English", "Kannada", "Tamil", "Telugu",
-        ],
-        "usage": "These are automatically applied as Vapi assistant overrides when starting a call.",
-    }
+    """Return the multi-language system prompt and first message for Vapi assistant.
+
+    Always returns a valid response with at least the default prompt so that
+    callers (e.g. the frontend ``prefetchPrompt``) never receive an error or
+    empty body.  If a future version loads the prompt from an external source,
+    any failure will be caught and the built-in default will be returned instead.
+    """
+    try:
+        prompt = SAATHI_SYSTEM_PROMPT
+        first_message = SAATHI_FIRST_MESSAGE
+        if not prompt:
+            logger.warning("system_prompt.empty falling back to hardcoded default")
+            prompt = _FALLBACK_SYSTEM_PROMPT
+            first_message = _FALLBACK_FIRST_MESSAGE
+        return {
+            "prompt": prompt,
+            "firstMessage": first_message,
+            "supported_languages": [
+                "Hindi", "English", "Kannada", "Tamil", "Telugu",
+            ],
+            "usage": "These are automatically applied as Vapi assistant overrides when starting a call.",
+            "fallback": not bool(SAATHI_SYSTEM_PROMPT),
+        }
+    except Exception as exc:
+        logger.exception("system_prompt.error falling back to hardcoded default: %s", exc)
+        return {
+            "prompt": _FALLBACK_SYSTEM_PROMPT,
+            "firstMessage": _FALLBACK_FIRST_MESSAGE,
+            "supported_languages": [
+                "Hindi", "English", "Kannada", "Tamil", "Telugu",
+            ],
+            "usage": "These are automatically applied as Vapi assistant overrides when starting a call.",
+            "fallback": True,
+        }
 
 
 @app.get("/api/session-prompt")
