@@ -261,10 +261,14 @@ def run_follow_up_reminders_for_today() -> dict[str, Any]:
                 f"Namaskar {name}, aaj ({today.strftime('%d-%b-%Y')}) aapki follow-up visit PHC par scheduled hai. "
                 f"Kripya samay par aayein. — SAATHI"
             )
-            _log_demo_sms(phone, msg, patient_id=str(pid), demo_recipient=demo_to)
-            update_patient_fields(str(pid), {"follow_up_reminder_sent_for": str(fu_key)})
-            sent += 1
-            logger.info("notifications.follow_up demo_logged patient_id=%s", pid)
+            try:
+                _log_demo_sms(phone, msg, patient_id=str(pid), demo_recipient=demo_to)
+                update_patient_fields(str(pid), {"follow_up_reminder_sent_for": str(fu_key)})
+                sent += 1
+                logger.info("notifications.follow_up demo_logged patient_id=%s", pid)
+            except Exception as e:
+                errors.append(f"{pid}: {e}")
+                logger.warning("notifications.follow_up demo fail patient_id=%s err=%s", pid, e)
         return {
             "ok": True,
             "demo": True,
