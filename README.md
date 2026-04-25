@@ -160,9 +160,14 @@ Keys are injected into `index.html` server-side. The app also calls **`/api/vapi
 | `TWILIO_AUTH_TOKEN` | Twilio auth token |
 | `TWILIO_SMS_FROM` | E.164 sender for **SMS** (e.g. `+1…`) |
 | `TWILIO_WHATSAPP_FROM` | e.g. `whatsapp:+14155238886` (sandbox or approved) |
-| `SAATHI_ANM_WHATSAPP_TO` | e.g. `whatsapp:+9198xxxxxxxx` for **daily register** |
+| `SAATHI_ANM_WHATSAPP_TO` | **Legacy** single-recipient daily register (e.g. `whatsapp:+9198xxxxxxxx`) |
 
 Visit-day SMS runs when **`follow_up_date`** equals **today (IST)**, patient has **`phone`**, and Twilio SMS is configured. After send, **`follow_up_reminder_sent_for`** is stored on the patient record to avoid duplicates.
+
+### Per-ANM daily register (recommended)
+Each saved visit can be tagged with the ANM’s WhatsApp (stored on the patient record as `registered_by_anm_whatsapp`). Then you can send one daily register per ANM using:
+
+- `POST /api/notifications/daily-register/whatsapp/all`
 
 ## Emergency Detection
 

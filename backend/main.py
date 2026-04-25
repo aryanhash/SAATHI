@@ -40,6 +40,7 @@ from services.notifications import (
     notification_status,
     run_follow_up_reminders_for_today,
     send_daily_register_whatsapp,
+    send_daily_register_whatsapp_all,
     start_reminder_background_thread,
 )
 from services.portal_mapper import build_portal_prefill
@@ -399,6 +400,13 @@ class ProcessVisitBody(BaseModel):
 
 class SimulateCallBody(BaseModel):
     transcript: str = Field(..., min_length=1)
+    # Used to tag who registered the patient, so daily registers can be sent per-ANM.
+    anm_id: str | None = None
+    anm_name: str | None = None
+    anm_whatsapp: str | None = Field(
+        default=None,
+        description="ANM WhatsApp, e.g. whatsapp:+9198xxxxxxx (or +91...; server will normalize when sending)",
+    )
 
 
 class SessionGapBody(BaseModel):
@@ -438,6 +446,9 @@ def _run_voice_pipeline(
     *,
     log_prefix: str,
     vapi_call_id: str | None = None,
+    anm_id: str | None = None,
+    anm_name: str | None = None,
+    anm_whatsapp: str | None = None,
 ) -> dict[str, Any]:
     _t0 = time.perf_counter()
     logger.info("%s pipeline.begin transcript_chars=%s", log_prefix, len(transcript))
@@ -461,6 +472,12 @@ def _run_voice_pipeline(
 
     if vapi_call_id:
         data["vapi_call_id"] = vapi_call_id
+    if anm_id:
+        data["registered_by_anm_id"] = anm_id
+    if anm_name:
+        data["registered_by_anm_name"] = anm_name
+    if anm_whatsapp:
+        data["registered_by_anm_whatsapp"] = anm_whatsapp
     try:
         pid = store_patient(data)
     except Exception as e:
@@ -569,6 +586,15 @@ def notifications_register_preview() -> dict[str, Any]:
 def notifications_register_whatsapp() -> dict[str, Any]:
     try:
         return send_daily_register_whatsapp()
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/api/notifications/daily-register/whatsapp/all")
+def notifications_register_whatsapp_all() -> dict[str, Any]:
+    """Send one daily register per ANM based on patient.registered_by_anm_whatsapp."""
+    try:
+        return send_daily_register_whatsapp_all()
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -1179,6 +1205,9 @@ def simulate_call(body: SimulateCallBody, _key: str | None = Depends(verify_api_
         body.transcript.strip(),
         log_prefix="[simulate-call]",
         vapi_call_id=None,
+        anm_id=body.anm_id,
+        anm_name=body.anm_name,
+        anm_whatsapp=body.anm_whatsapp,
     )
 
 

@@ -76,6 +76,24 @@ def _normalize_phone_e164(raw: str | None) -> str | None:
     return None
 
 
+def _normalize_whatsapp_to(raw: str | None) -> str | None:
+    """
+    Normalize a WhatsApp recipient/sender into Twilio format: ``whatsapp:+E164``.
+    Accepts: ``+91...``, ``9198...``, ``whatsapp:+91...``, or a 10-digit Indian mobile.
+    """
+    if not raw:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    if s.lower().startswith("whatsapp:"):
+        s2 = s.split(":", 1)[1].strip()
+        p = _normalize_phone_e164(s2)
+        return f"whatsapp:{p}" if p else None
+    p = _normalize_phone_e164(s)
+    return f"whatsapp:{p}" if p else None
+
+
 def _demo_e164_or_none() -> str | None:
     return _normalize_phone_e164(os.environ.get("SAATHI_DEMO_PHONE"))
 
@@ -294,7 +312,10 @@ def run_follow_up_reminders_for_today() -> dict[str, Any]:
 
 
 def send_daily_register_whatsapp() -> dict[str, Any]:
-    """Build today's register from Qdrant and send to ANM WhatsApp (env)."""
+    """
+    Legacy single-recipient register sender.
+    Builds today's register from Qdrant and sends to ``SAATHI_ANM_WHATSAPP_TO`` (env).
+    """
     today = datetime.now(IST).date()
     body = build_daily_register_text(get_all_patients(), today)
 
@@ -320,11 +341,94 @@ def send_daily_register_whatsapp() -> dict[str, Any]:
             "note": "Use whatsapp_open_url in a browser to open your WhatsApp with this draft (no API send).",
         }
 
-    to = (os.environ.get("SAATHI_ANM_WHATSAPP_TO") or "").strip()
+    to = _normalize_whatsapp_to(os.environ.get("SAATHI_ANM_WHATSAPP_TO"))
     if not to:
         raise RuntimeError("Set SAATHI_ANM_WHATSAPP_TO e.g. whatsapp:+9198xxxxxxxx")
     out = send_whatsapp(to, body)
     return {"ok": True, "to": to, "sid": out.get("sid"), "chars": len(body)}
+
+
+def send_daily_register_whatsapp_all() -> dict[str, Any]:
+    """
+    Per-ANM daily register:
+    - Groups patients by ``registered_by_anm_whatsapp`` stored on each patient record.
+    - Sends one WhatsApp register per ANM containing only patients they registered.
+    """
+    today = datetime.now(IST).date()
+    patients = get_all_patients()
+
+    groups: dict[str, list[dict[str, Any]]] = {}
+    unassigned = 0
+    for p in patients:
+        to = _normalize_whatsapp_to(p.get("registered_by_anm_whatsapp"))
+        if not to:
+            unassigned += 1
+            continue
+        groups.setdefault(to, []).append(p)
+
+    if not groups:
+        raise RuntimeError(
+            "No ANM WhatsApp numbers found on patient records. "
+            "Ensure the UI sends anm_whatsapp when saving visits so patients get tagged with registered_by_anm_whatsapp."
+        )
+
+    # Demo mode: generate click-to-chat drafts (no Twilio send).
+    if notifications_demo_mode():
+        demo_to = _demo_e164_or_none()
+        if not demo_to:
+            raise RuntimeError(
+                "Demo mode: set SAATHI_DEMO_PHONE=+91XXXXXXXXXX (E.164), or configure Twilio WhatsApp for real sending.",
+            )
+        drafts: list[dict[str, Any]] = []
+        for intended_to, plist in sorted(groups.items(), key=lambda kv: kv[0]):
+            body = build_daily_register_text(plist, today)
+            url = _wa_me_url(demo_to, body)
+            drafts.append(
+                {
+                    "intended_to": intended_to,
+                    "demo_to": f"whatsapp:{demo_to}",
+                    "whatsapp_open_url": url,
+                    "chars": len(body),
+                    "patient_total_for_anm": len(plist),
+                }
+            )
+        return {
+            "ok": True,
+            "demo": True,
+            "date": today.isoformat(),
+            "anm_count": len(groups),
+            "unassigned_patients": unassigned,
+            "drafts": drafts,
+            "note": "Demo mode: open each whatsapp_open_url to send manually (no API send).",
+        }
+
+    # Real Twilio send
+    results: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for to, plist in sorted(groups.items(), key=lambda kv: kv[0]):
+        body = build_daily_register_text(plist, today)
+        try:
+            out = send_whatsapp(to, body)
+            results.append(
+                {
+                    "to": to,
+                    "sid": out.get("sid"),
+                    "chars": len(body),
+                    "patient_total_for_anm": len(plist),
+                }
+            )
+        except Exception as e:
+            errors.append(f"{to}: {e}")
+
+    return {
+        "ok": len(errors) == 0,
+        "date": today.isoformat(),
+        "anm_count": len(groups),
+        "sent": len(results),
+        "unassigned_patients": unassigned,
+        "results": results,
+        "errors": errors,
+    }
 
 
 def notification_status() -> dict[str, Any]:
@@ -334,15 +438,16 @@ def notification_status() -> dict[str, Any]:
         "demo_mode": demo,
         "demo_phone_set": bool(demo_phone),
         "twilio_sms_ready": _twilio_sms_send_ready(),
-        "twilio_whatsapp_ready": bool(
-            _twilio_whatsapp_send_ready() and (os.environ.get("SAATHI_ANM_WHATSAPP_TO") or "").strip(),
-        ),
-        "anm_whatsapp_to_set": bool((os.environ.get("SAATHI_ANM_WHATSAPP_TO") or "").strip()),
+        # WhatsApp sender readiness (per-ANM recipients are stored on patient records).
+        "twilio_whatsapp_sender_ready": _twilio_whatsapp_send_ready(),
+        # Legacy single-recipient config (still supported).
+        "twilio_whatsapp_legacy_ready": bool(_twilio_whatsapp_send_ready() and _normalize_whatsapp_to(os.environ.get("SAATHI_ANM_WHATSAPP_TO"))),
+        "anm_whatsapp_to_set": bool(_normalize_whatsapp_to(os.environ.get("SAATHI_ANM_WHATSAPP_TO"))),
         "notifications_usable": bool(
             (demo and demo_phone)
             or _twilio_sms_send_ready()
             or (
-                _twilio_whatsapp_send_ready() and (os.environ.get("SAATHI_ANM_WHATSAPP_TO") or "").strip()
+                _twilio_whatsapp_send_ready()
             )
         ),
     }

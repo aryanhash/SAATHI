@@ -281,9 +281,21 @@ def store_patient(data: dict[str, Any]) -> str:
         history.append(snapshot)
 
         merged = dict(old_payload)
+        # Preserve who originally registered the patient (first writer wins).
+        # Later visits should not overwrite registration ownership.
+        _registration_keys = {
+            "registered_by_anm_id",
+            "registered_by_anm_name",
+            "registered_by_anm_whatsapp",
+        }
         for k, v in data.items():
-            if v is not None:
-                merged[k] = v
+            if v is None:
+                continue
+            if k in _registration_keys:
+                existing_v = merged.get(k)
+                if existing_v is not None and str(existing_v).strip() != "":
+                    continue
+            merged[k] = v
         merged["visit_history"] = history
         merged["visit_count"] = len(history) + 1
         merged["last_updated"] = now

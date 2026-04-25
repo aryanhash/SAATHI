@@ -150,12 +150,26 @@
 
         <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
           <p class="text-xs font-bold uppercase tracking-wide text-slate-600">Reminders &amp; register</p>
+          <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <input
+              type="text"
+              id="anm-name"
+              placeholder="ANM name (for tagging visits)"
+              class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs shadow-soft focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            />
+            <input
+              type="text"
+              id="anm-whatsapp"
+              placeholder="ANM WhatsApp (e.g. +9198… or whatsapp:+9198…)"
+              class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs shadow-soft focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            />
+          </div>
           <div class="mt-2 flex flex-wrap gap-2">
             <button type="button" id="btn-run-reminders" class="rounded-xl border border-emerald-300 bg-white px-3 py-2 text-[11px] font-semibold text-emerald-800 shadow-sm hover:bg-emerald-50">
               Run visit-day SMS
             </button>
             <button type="button" id="btn-send-register-wa" class="rounded-xl border border-emerald-600 bg-emerald-600 px-3 py-2 text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-700">
-              WhatsApp daily register
+              WhatsApp daily register (all ANMs)
             </button>
           </div>
         </div>
@@ -1022,6 +1036,37 @@
           }, 2000);
         }
 
+        function initAnmProfile() {
+          var nameEl = $("anm-name");
+          var waEl = $("anm-whatsapp");
+          if (!nameEl || !waEl) return;
+          try {
+            nameEl.value = localStorage.getItem("saathi_anm_name") || "";
+            waEl.value = localStorage.getItem("saathi_anm_whatsapp") || "";
+          } catch (_) {}
+          function persist() {
+            try {
+              localStorage.setItem("saathi_anm_name", String(nameEl.value || "").trim());
+              localStorage.setItem("saathi_anm_whatsapp", String(waEl.value || "").trim());
+            } catch (_) {}
+          }
+          nameEl.addEventListener("input", persist);
+          waEl.addEventListener("input", persist);
+        }
+
+        function getAnmContext() {
+          var name = "";
+          var wa = "";
+          try {
+            name = (localStorage.getItem("saathi_anm_name") || "").trim();
+            wa = (localStorage.getItem("saathi_anm_whatsapp") || "").trim();
+          } catch (_) {}
+          var out = {};
+          if (name) out.anm_name = name;
+          if (wa) out.anm_whatsapp = wa;
+          return out;
+        }
+
         function flushCurrentPatient(onEnd) {
           clearPauseGapTimer();
           lastGapPromptForBlob = null;
@@ -1041,7 +1086,8 @@
           renderSessionPanel();
           var idx = sessionPatients.length - 1;
 
-          api("/simulate-call", { method: "POST", body: JSON.stringify({ transcript: transcript }) })
+          var payload = Object.assign({ transcript: transcript }, getAnmContext());
+          api("/simulate-call", { method: "POST", body: JSON.stringify(payload) })
             .then(function (res) {
               var p = (res && res.patient) || {};
               var em = p.emergency || {};
@@ -1128,12 +1174,14 @@
 
         on("btn-send-register-wa", "click", async function () {
           try {
-            var r = await api("/api/notifications/daily-register/whatsapp", { method: "POST" });
-            if (r.demo && r.whatsapp_open_url) {
-              showToast("Demo: opening WhatsApp draft (your number) — tap Send in the app");
-              window.open(r.whatsapp_open_url, "_blank", "noopener,noreferrer");
+            var r = await api("/api/notifications/daily-register/whatsapp/all", { method: "POST" });
+            if (r.demo && r.drafts && r.drafts.length) {
+              console.log("Daily register drafts:", r.drafts);
+              showToast("Demo: generated " + r.drafts.length + " WhatsApp drafts — opening the first (tap Send)");
+              window.open(r.drafts[0].whatsapp_open_url, "_blank", "noopener,noreferrer");
             } else {
-              showToast("WhatsApp sent · " + (r.sid || "ok"));
+              var sent = r.sent != null ? r.sent : (r.results ? r.results.length : 0);
+              showToast("Daily register sent to " + sent + " ANMs" + (r.errors && r.errors.length ? " (some failed)" : ""));
             }
           } catch (e) {
             showToast(String(e.message || e));
@@ -1163,7 +1211,8 @@
           msg.textContent = "Saving demo visit…";
           setReady("WORKING");
           try {
-            var res = await api("/simulate-call", { method: "POST", body: JSON.stringify({ transcript: MOCK_TRANSCRIPT }) });
+            var payload = Object.assign({ transcript: MOCK_TRANSCRIPT }, getAnmContext());
+            var res = await api("/simulate-call", { method: "POST", body: JSON.stringify(payload) });
             var pname = res.patient && res.patient.patient_name ? res.patient.patient_name : "OK";
             var em = res.patient && res.patient.emergency;
             if (em && em.is_emergency) {
@@ -1334,6 +1383,7 @@
           .then(function () {
             try {
               initVapiUi();
+              initAnmProfile();
               showView("home");
               loadDashboard();
             } catch (err) {
