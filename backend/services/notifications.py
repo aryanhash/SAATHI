@@ -283,8 +283,22 @@ def run_follow_up_reminders_for_today() -> dict[str, Any]:
         }
 
     if not _twilio_sms_send_ready():
-        logger.info("notifications.follow_up skip twilio_not_configured")
-        return {"ok": False, "reason": "twilio_not_configured", "today": today_s}
+        missing: list[str] = []
+        if not (os.environ.get("TWILIO_ACCOUNT_SID") or "").strip():
+            missing.append("TWILIO_ACCOUNT_SID")
+        if not (os.environ.get("TWILIO_AUTH_TOKEN") or "").strip():
+            missing.append("TWILIO_AUTH_TOKEN")
+        if not (os.environ.get("TWILIO_SMS_FROM") or "").strip():
+            missing.append("TWILIO_SMS_FROM")
+        logger.info("notifications.follow_up skip twilio_not_configured missing=%s", missing)
+        return {
+            "ok": False,
+            "reason": "twilio_not_configured",
+            "today": today_s,
+            "missing_env": missing,
+            "hint": "Add these in Render (or your host) environment — not only a local .env. "
+            "Visit-day SMS needs Account SID, Auth token, and an SMS-capable From number (E.164).",
+        }
 
     for p in patients:
         pid = p.get("patient_id")

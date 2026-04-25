@@ -1175,7 +1175,11 @@
           try {
             var r = await api("/api/notifications/follow-up-reminders/run", { method: "POST" });
             if (r.reason === "twilio_not_configured") {
-              showToast("Twilio not configured — add TWILIO_* or SAATHI_DEMO_PHONE for demo logs");
+              var miss = (r.missing_env && r.missing_env.length) ? " Missing: " + r.missing_env.join(", ") + ". " : " ";
+              showToast(
+                (r.hint || "Set Twilio in your host (e.g. Render) env, not only local .env.") + miss +
+                  "On Render: Environment → add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_SMS_FROM.",
+              );
             } else if (r.reason === "demo_phone_required") {
               showToast(r.detail || "Set SAATHI_DEMO_PHONE in .env for demo");
             } else if (r.demo) {
